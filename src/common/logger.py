@@ -1,14 +1,17 @@
-"""Centralized logging helpers for the interview AI modules."""
+"""Centralized logging helpers for the MLDT planner."""
 
 from __future__ import annotations
 
 import logging
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 _CONFIGURED = False
 _FILE_HANDLERS: Dict[Tuple[str, str], logging.Handler] = {}
 _DEFAULT_LOG_DIR = Path("logs")
+_ROTATION_BYTES = 2 * 1024 * 1024  # 2MB
+_BACKUP_COUNT = 3
 
 
 def _configure_logger() -> None:
@@ -39,7 +42,12 @@ def _ensure_file_handler(logger: logging.Logger, filename: str) -> None:
     if file_path.parent and not file_path.parent.exists():
         file_path.parent.mkdir(parents=True, exist_ok=True)
 
-    handler = logging.FileHandler(str(file_path), encoding="utf-8")
+    handler = RotatingFileHandler(
+        str(file_path),
+        encoding="utf-8",
+        maxBytes=_ROTATION_BYTES,
+        backupCount=_BACKUP_COUNT,
+    )
     handler.setFormatter(
         logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
     )

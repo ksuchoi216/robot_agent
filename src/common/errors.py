@@ -1,8 +1,8 @@
-"""Centralized error definitions for the oneit interview AI module."""
+"""Centralized error definitions for the MLDT-based planner."""
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Mapping, Optional
+from typing import Any, Mapping
 
 
 class BaseServiceError(Exception):
@@ -40,4 +40,44 @@ class BaseServiceError(Exception):
         return payload
 
 
-__all__ = ("BaseServiceError",)
+class ConfigError(BaseServiceError):
+    """Raised when configuration files are missing or invalid."""
+
+    default_code = "CONFIG_ERROR"
+
+
+class PromptLoadError(BaseServiceError):
+    """Raised when prompt templates cannot be loaded."""
+
+    default_code = "PROMPT_LOAD_ERROR"
+
+
+class ParsingError(BaseServiceError):
+    """Raised when parser cannot extract structured data."""
+
+    default_code = "PARSING_ERROR"
+    default_status = 422
+
+
+class LLMError(BaseServiceError):
+    """Raised when LLM calls fail or responses are unusable."""
+
+    default_code = "LLM_ERROR"
+    default_status = 502
+
+
+class GraphExecutionError(BaseServiceError):
+    """Raised when the planner graph cannot complete execution."""
+
+    default_code = "GRAPH_EXECUTION_ERROR"
+    default_status = 500
+
+
+__all__ = (
+    "BaseServiceError",
+    "ConfigError",
+    "PromptLoadError",
+    "ParsingError",
+    "LLMError",
+    "GraphExecutionError",
+)
