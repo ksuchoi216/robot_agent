@@ -4,6 +4,14 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+# status descriptions:
+# 400: Bad Request - The request could not be understood or was missing required parameters.
+# 422: Unprocessable Entity - The request was well-formed but was unable to be
+#      followed due to semantic errors.
+# 500: Internal Server Error - An error occurred on the server.
+# 502: Bad Gateway - The server was acting as a gateway or proxy and received
+#      an invalid response from the upstream server.
+
 
 class BaseServiceError(Exception):
     """Base exception that provides structured metadata for logging and APIs."""
@@ -70,6 +78,20 @@ class GraphExecutionError(BaseServiceError):
     """Raised when the planner graph cannot complete execution."""
 
     default_code = "GRAPH_EXECUTION_ERROR"
+    default_status = 500
+
+
+class UtilsValidationError(BaseServiceError):
+    """Raised when validation of inputs or state fails."""
+
+    default_code = "VALIDATION_ERROR"
+    default_status = 400
+
+
+class UtilsConfigurationError(BaseServiceError):
+    """Raised when there is a configuration error in utils."""
+
+    default_code = "UTILS_CONFIGURATION_ERROR"
     default_status = 500
 
 

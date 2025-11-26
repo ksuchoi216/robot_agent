@@ -37,21 +37,12 @@ class PathConfig(BaseModel):
     prompt_dir: str
 
 
-class ParsingConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    goal_regex: str
-    task_regex: str
-    action_regex: str
-
-
 class AppConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     llm: LLMConfig
     retry: RetryConfig
     paths: PathConfig
-    parsing: ParsingConfig
 
 
 _DEFAULT_CONFIG_CANDIDATES: tuple[Path, ...] = (
@@ -155,7 +146,6 @@ __all__ = [
     "LLMConfig",
     "RetryConfig",
     "PathConfig",
-    "ParsingConfig",
     "load_config",
     "load_prompt",
     "load_prompt_from_dir",

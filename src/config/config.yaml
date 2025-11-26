@@ -1,0 +1,14 @@
+paths:
+  output_dir: "output/"
+  prompt_dir: "src/graph/prompts/"
+
+runner:
+  goal_node:
+    model_name: gpt41mini
+    prompt_cache_key: goal_node
+  task_node:
+    model_name: gpt41mini
+    prompt_cache_key: task_node
+  action_node:
+    model_name: gpt41mini
+    prompt_cache_key: action_node

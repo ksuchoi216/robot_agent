@@ -5,19 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Tuple
 
-from langchain_core.output_parsers import StrOutputParser
+from langchain_core.output_parsers import OutputParserException
 from langchain_core.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
-from langsmith.run_helpers import traceable
 
 from ..common.errors import GraphExecutionError, LLMError, ParsingError
 from ..common.logger import get_logger
-from ..common.parser import (
-    parse_action_output,
-    parse_goal_output,
-    parse_task_output,
-)
+from ..common.parser import PlannerList, create_planner_list_parser
 from .state import PlannerState
 
 logger = get_logger(__name__)
@@ -35,7 +30,7 @@ class LLMChainResources:
     llm: Any
     parser: Any
 
-    def run(self, inputs: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    def run(self, inputs: Dict[str, Any]) -> Tuple[str, Any, Dict[str, Any]]:
         prompt_value = self.prompt.invoke(inputs)
         try:
             raw_response = self.llm.invoke(prompt_value)
@@ -44,9 +39,19 @@ class LLMChainResources:
                 "LLM invocation failed.", details={"inputs": inputs}
             ) from exc
 
-        parsed_output = self.parser.invoke(raw_response) if self.parser else raw_response
+        try:
+            parsed_output = (
+                self.parser.invoke(raw_response) if self.parser else raw_response
+            )
+        except OutputParserException as exc:
+            raw_text = _coerce_text(raw_response)
+            raise ParsingError(
+                "Failed to parse LLM output.", details={"raw_output": raw_text}
+            ) from exc
+
+        raw_text = _coerce_text(raw_response)
         headers = _extract_headers(raw_response, self.llm)
-        return _coerce_text(parsed_output), headers
+        return raw_text, parsed_output, headers
 
 
 def create_llm(
@@ -79,10 +84,30 @@ def _coerce_text(value: Any) -> str:
     return str(value)
 
 
-def _build_llm_chain(llm: Any, prompt_text: str) -> LLMChainResources:
-    prompt = PromptTemplate.from_template(prompt_text)
-    parser = StrOutputParser()
+def _build_llm_chain(
+    llm: Any, prompt_text: str, parser: Any
+) -> LLMChainResources:
+    template_text = prompt_text.strip()
+    if "{format_instructions}" not in template_text:
+        template_text = f"{template_text}\n\n{{format_instructions}}"
+
+    prompt = PromptTemplate.from_template(template_text).partial(
+        format_instructions=parser.get_format_instructions()
+    )
     return LLMChainResources(prompt=prompt, llm=llm, parser=parser)
+
+
+def _extract_items(parsed_output: Any) -> List[str]:
+    if isinstance(parsed_output, PlannerList):
+        return parsed_output.items
+    if isinstance(parsed_output, dict) and "items" in parsed_output:
+        items = parsed_output.get("items")
+        if isinstance(items, list):
+            return [str(item) for item in items]
+    raise ParsingError(
+        "Parsed output did not contain an 'items' list.",
+        details={"parsed_output": repr(parsed_output)},
+    )
 
 
 def _resolve_llm_model_name(llm: Any) -> str:
@@ -157,14 +182,14 @@ def _execute_with_retries(
 
 def make_goal_node(
     goal_chain: LLMChainResources,
-    goal_regex: str,
     max_retries: int,
 ) -> Callable[[PlannerState], PlannerState]:
-    @traceable(name="planner.goal", tags=["planner", "goal"])
     def goal_node(state: PlannerState) -> PlannerState:
         def _run_goal() -> Tuple[NodeResult, Dict[str, Any]]:
-            raw_text, headers = goal_chain.run({"user_query": state["user_query"]})
-            items = parse_goal_output(raw_text, goal_regex)
+            raw_text, parsed_output, headers = goal_chain.run(
+                {"user_query": state["user_query"]}
+            )
+            items = _extract_items(parsed_output)
             return NodeResult(raw_output=raw_text, items=items), headers
 
         result, headers = _execute_with_retries(
@@ -180,21 +205,20 @@ def make_goal_node(
 
 def make_task_node(
     task_chain: LLMChainResources,
-    task_regex: str,
     max_retries: int,
 ) -> Callable[[PlannerState], PlannerState]:
-    @traceable(name="planner.task", tags=["planner", "task"])
     def task_node(state: PlannerState) -> PlannerState:
         subgoals = state.get("subgoals", []) or []
         context_value = state.get("context") or "N/A"
         task_results: List[Dict[str, Any]] = []
 
         for subgoal in subgoals:
+
             def _run_task(subgoal: str = subgoal) -> Tuple[NodeResult, Dict[str, Any]]:
-                raw_text, headers = task_chain.run(
+                raw_text, parsed_output, headers = task_chain.run(
                     {"subgoal": subgoal, "context": context_value}
                 )
-                items = parse_task_output(raw_text, task_regex)
+                items = _extract_items(parsed_output)
                 return NodeResult(raw_output=raw_text, items=items), headers
 
             result, headers = _execute_with_retries(
@@ -217,10 +241,8 @@ def make_task_node(
 
 def make_action_node(
     action_chain: LLMChainResources,
-    action_regex: str,
     max_retries: int,
 ) -> Callable[[PlannerState], PlannerState]:
-    @traceable(name="planner.action", tags=["planner", "action"])
     def action_node(state: PlannerState) -> PlannerState:
         tasks = state.get("tasks", []) or []
         action_details: List[Dict[str, Any]] = []
@@ -228,11 +250,14 @@ def make_action_node(
 
         for task in tasks:
             for subtask in task.get("subtasks", []):
+
                 def _run_action(
                     subtask: str = subtask,
                 ) -> Tuple[NodeResult, Dict[str, Any]]:
-                    raw_text, headers = action_chain.run({"subtask": subtask})
-                    items = parse_action_output(raw_text, action_regex)
+                    raw_text, parsed_output, headers = action_chain.run(
+                        {"subtask": subtask}
+                    )
+                    items = _extract_items(parsed_output)
                     return NodeResult(raw_output=raw_text, items=items), headers
 
                 result, headers = _execute_with_retries(
@@ -261,23 +286,22 @@ def create_planner_graph(
     goal_prompt: str,
     task_prompt: str,
     action_prompt: str,
-    goal_regex: str,
-    task_regex: str,
-    action_regex: str,
     max_retries: int,
     thread_id: str = "planner",
     save_graph_png: bool = False,
 ) -> Tuple[Any, Dict[str, Any]]:
-    goal_chain = _build_llm_chain(llm, goal_prompt)
-    task_chain = _build_llm_chain(llm, task_prompt)
-    action_chain = _build_llm_chain(llm, action_prompt)
+    goal_parser = create_planner_list_parser()
+    task_parser = create_planner_list_parser()
+    action_parser = create_planner_list_parser()
+
+    goal_chain = _build_llm_chain(llm, goal_prompt, goal_parser)
+    task_chain = _build_llm_chain(llm, task_prompt, task_parser)
+    action_chain = _build_llm_chain(llm, action_prompt, action_parser)
 
     workflow = StateGraph(state_schema=PlannerState)
-    workflow.add_node("goal_planner", make_goal_node(goal_chain, goal_regex, max_retries))
-    workflow.add_node("task_planner", make_task_node(task_chain, task_regex, max_retries))
-    workflow.add_node(
-        "action_planner", make_action_node(action_chain, action_regex, max_retries)
-    )
+    workflow.add_node("goal_planner", make_goal_node(goal_chain, max_retries))
+    workflow.add_node("task_planner", make_task_node(task_chain, max_retries))
+    workflow.add_node("action_planner", make_action_node(action_chain, max_retries))
 
     workflow.add_edge(START, "goal_planner")
     workflow.add_edge("goal_planner", "task_planner")
