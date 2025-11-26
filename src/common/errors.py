@@ -95,11 +95,18 @@ class UtilsConfigurationError(BaseServiceError):
     default_status = 500
 
 
+class GraphInitializeError(BaseServiceError):
+    """Raised when the Graph is in an invalid state."""
+
+    default_code = "GRAPH_INITIALIZE_ERROR"
+    default_status = 500
+
+
 __all__ = (
     "BaseServiceError",
     "ConfigError",
     "PromptLoadError",
     "ParsingError",
     "LLMError",
-    "GraphExecutionError",
+    "GraphInitializeError",
 )

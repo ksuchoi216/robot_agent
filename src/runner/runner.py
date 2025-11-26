@@ -2,134 +2,122 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List, Tuple
 
-from langsmith.run_helpers import traceable
-
+from ..common.enums import ModelNames
+from ..common.errors import GraphInitializeError
 from ..common.logger import get_logger
-from ..common.utils import (
-    AppConfig,
-    load_config,
-    load_prompt_from_dir,
-    make_run_output_dir,
-    resolve_path,
-    save_json,
-)
-from .graph import create_llm, create_planner_graph
+from ..config.config import Config
+from . import graph as graph_module
 from .state import PlannerState, PlannerStateMaker
 
 logger = get_logger(__name__)
 
 
-class PlannerRunner:
-    """High-level runner that initializes configuration, LLM, and LangGraph nodes."""
-
+class Runner:
     def __init__(
         self,
-        config_path: str | Path | None = None,
-        llm: Any | None = None,
-        state_maker: PlannerStateMaker | None = None,
+        config: Config,
+        result_key: str,
+        token_information_changed_callback: Callable | None = None,
+    ):
+        self.config = config
+        self.result_key = result_key
+        self.graph: Any | None = None
+        self.graph_config: Dict[str, Any] | None = None
+        self.retriever = None
+
+        self._llm_cache: Dict[Tuple[str, float, str | None, bool], Any] = {}
+
+        if token_information_changed_callback is not None:
+            self.token_information_changed_callback = token_information_changed_callback
+        else:
+            self.token_information_changed_callback = None
+
+    def set_retriever(self, retriever):
+        self.retriever = retriever
+        self.graph = None
+        self.graph_config = None
+
+    def build_graph(self):
+        raise NotImplementedError("Subclasses must implement build_graph().")
+
+    def _get_llm(
+        self,
+        model_name: ModelNames | str,
         *,
-        thread_id: str = "planner",
-        save_graph_png: bool = False,
-    ) -> None:
-        self.project_root = Path(__file__).resolve().parents[2]
-        self.config: AppConfig = load_config(config_path)
+        temperature: float = 0.0,
+        prompt_cache_key: str | None = None,
+        bind_tools: bool = False,
+    ):
+        if isinstance(model_name, ModelNames):
+            model_enum = model_name
+        else:
+            try:
+                # Try interpret as enum value (e.g., "gpt-4.1")
+                model_enum = ModelNames(model_name)
+            except ValueError:
+                # Fallback to enum key (e.g., "gpt_4_1")
+                model_enum = ModelNames[model_name]
 
-        self.prompt_dir = resolve_path(self.project_root, self.config.paths.prompt_dir)
-        self.output_root = resolve_path(self.project_root, self.config.paths.output_dir)
-        self.state_maker = state_maker or PlannerStateMaker()
+        cache_key = (model_enum.value, temperature, prompt_cache_key, bind_tools)
+        llm = self._llm_cache.get(cache_key)
+        if llm is None:
+            llm = graph_module.create_llm(
+                model_name=model_enum,
+                temperature=temperature,
+                prompt_cache_key=prompt_cache_key,
+            )
+            self._llm_cache[cache_key] = llm
+        return llm
 
-        self.llm = llm or create_llm(
-            model_name=self.config.llm.model_name,
-            temperature=self.config.llm.temperature,
-            max_tokens=self.config.llm.max_tokens,
-        )
+    def _ensure_graph(self) -> Tuple[Any, Dict[str, Any]]:
+        if self.graph is None or self.graph_config is None:
+            self.graph, self.graph_config = self.build_graph()
+        if self.graph is None or self.graph_config is None:
+            raise GraphInitializeError(
+                "Graph or graph_config is not properly initialized."
+            )
+        return self.graph, self.graph_config
 
-        goal_prompt = load_prompt_from_dir(self.prompt_dir, "planning/goal_prompt.md")
-        task_prompt = load_prompt_from_dir(self.prompt_dir, "planning/task_prompt.md")
-        action_prompt = load_prompt_from_dir(
-            self.prompt_dir, "planning/action_prompt.md"
-        )
+    def get_result_from_states(self, states, return_last=True):
+        state_list = states if isinstance(states, list) else [states]
 
-        self.graph, self.graph_config = create_planner_graph(
-            llm=self.llm,
-            goal_prompt=goal_prompt,
-            task_prompt=task_prompt,
-            action_prompt=action_prompt,
-            max_retries=self.config.retry.max_retries,
-            thread_id=thread_id,
-            save_graph_png=save_graph_png,
-        )
+        def extract_result(state):
+            value = state[self.result_key]
+            return value[-1] if return_last else value
 
-    @traceable(name="planner.run", tags=["planner", "graph"])
-    def run(self, user_query: str, *, context: str | None = None) -> Dict[str, Any]:
-        """Execute the Goal -> Task -> Action graph for a single user query."""
-        logger.info("Running planner for user query: %s", user_query)
+        def extract_headers(state):
+            headers_dict = state.get("headers_dict", {})
+            return headers_dict
 
-        initial_state: PlannerState = self.state_maker.make(
-            user_query=user_query, context=context
-        )
-        final_state = self.graph.invoke(initial_state, self.graph_config)
-
-        subgoals = final_state.get("subgoals", []) or []
-        task_results = final_state.get("tasks", []) or []
-        action_details = final_state.get("action_details", []) or []
-        merged_actions = final_state.get("actions", []) or []
-
-        run_dir = make_run_output_dir(self.output_root)
-        self._persist_outputs(
-            run_dir=run_dir,
-            user_query=user_query,
-            context=context,
-            subgoals=subgoals,
-            raw_goal_output=final_state.get("raw_goal_output", ""),
-            task_results=task_results,
-            action_details=action_details,
-            merged_actions=merged_actions,
-        )
+        results = [extract_result(state) for state in state_list]
+        headers = [extract_headers(state) for state in state_list]
+        final_result = results[0] if len(results) == 1 else results
+        final_headers = headers[0] if len(headers) == 1 else headers
 
         return {
-            "user_query": user_query,
-            "context": context,
-            "subgoals": subgoals,
-            "tasks": task_results,
-            "actions": merged_actions,
-            "run_dir": str(run_dir),
-            "headers": final_state.get("headers_dict", {}),
+            "result": final_result,
+            "state": state_list,
+            "headers": final_headers,
         }
 
-    def _persist_outputs(
-        self,
-        *,
-        run_dir: Path,
-        user_query: str,
-        context: str | None,
-        subgoals: List[str],
-        raw_goal_output: str,
-        task_results: List[Dict[str, Any]],
-        action_details: List[Dict[str, Any]],
-        merged_actions: List[str],
-    ) -> None:
-        goal_payload = {
-            "user_query": user_query,
-            "subgoals": subgoals,
-            "raw_output": raw_goal_output,
-        }
-        task_payload = {
-            "context": context,
-            "tasks": task_results,
-        }
-        action_payload = {
-            "actions": merged_actions,
-            "details": action_details,
-        }
+    def invoke(self, state):
+        graph, graph_config = self._ensure_graph()
+        final_state = graph.invoke(state, graph_config)
+        return self.get_result_from_states(final_state)
 
-        save_json(run_dir / "goal.json", goal_payload)
-        save_json(run_dir / "task.json", task_payload)
-        save_json(run_dir / "action.json", action_payload)
-        logger.info("Saved outputs to %s", run_dir)
+    async def ainvoke(self, state):
+        graph, graph_config = self._ensure_graph()
+        final_state = await graph.ainvoke(state, graph_config)
+        return self.get_result_from_states(final_state)
+
+    def batch(self, states):
+        graph, graph_config = self._ensure_graph()
+        final_states = graph.batch(states, graph_config)
+        return [self.get_result_from_states(state) for state in final_states]
 
 
-__all__ = ["PlannerRunner"]
+class PlanRunner(Runner):
+    def build_graph(self):
+        pass

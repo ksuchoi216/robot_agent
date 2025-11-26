@@ -36,8 +36,8 @@ class Config(BaseModel):
 def load_config(config_path: str | Path | None = None) -> Config:
     if config_path is None:
         # Default to this module's config directory when no path is provided
-        config_root = Path(__file__).resolve().parents[2]
-        config_path = config_root / "config" / "config.yaml"
+        config_dir = Path(__file__).resolve().parent
+        config_path = config_dir / "config.yaml"
 
     with open(config_path, "r", encoding="utf-8") as f:
         raw_config = yaml.safe_load(f)

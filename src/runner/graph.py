@@ -3,111 +3,104 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Literal, Tuple
 
-from langchain_core.output_parsers import OutputParserException
+# from langchain_core.exceptions import OutputParserException
+from langchain_core.output_parsers import PydanticOutputParser, StrOutputParser
+from langchain_core.prompt_values import PromptValue
 from langchain_core.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 
-from ..common.errors import GraphExecutionError, LLMError, ParsingError
+from ..common.enums import ModelNames
 from ..common.logger import get_logger
-from ..common.parser import PlannerList, create_planner_list_parser
 from .state import PlannerState
 
 logger = get_logger(__name__)
+StateCallable = Callable[[Any], Any]
+RouterCallable = Callable[[Any], str]
+
+_DEFAULT_TEMPERATURE_ONLY_MODELS: set[ModelNames] = {
+    ModelNames.gpt5,
+    ModelNames.gpt5mini,
+    ModelNames.gpt5nano,
+}
 
 
-@dataclass
-class NodeResult:
-    raw_output: str
-    items: List[str]
+# ! headers
+def format_headers(
+    model_name: str, header_payload: Dict[str, Any], token_usage: Dict[str, Any]
+) -> Dict[str, Any]:
+    formatted: Dict[str, Any] = {"model_name": model_name}
 
-
-@dataclass
-class LLMChainResources:
-    prompt: PromptTemplate
-    llm: Any
-    parser: Any
-
-    def run(self, inputs: Dict[str, Any]) -> Tuple[str, Any, Dict[str, Any]]:
-        prompt_value = self.prompt.invoke(inputs)
-        try:
-            raw_response = self.llm.invoke(prompt_value)
-        except Exception as exc:  # noqa: BLE001
-            raise LLMError(
-                "LLM invocation failed.", details={"inputs": inputs}
-            ) from exc
-
-        try:
-            parsed_output = (
-                self.parser.invoke(raw_response) if self.parser else raw_response
-            )
-        except OutputParserException as exc:
-            raw_text = _coerce_text(raw_response)
-            raise ParsingError(
-                "Failed to parse LLM output.", details={"raw_output": raw_text}
-            ) from exc
-
-        raw_text = _coerce_text(raw_response)
-        headers = _extract_headers(raw_response, self.llm)
-        return raw_text, parsed_output, headers
-
-
-def create_llm(
-    model_name: str,
-    *,
-    temperature: float | None = 0.0,
-    max_tokens: int | None = None,
-) -> ChatOpenAI:
-    model_name_str = getattr(model_name, "value", str(model_name))
-    kwargs: Dict[str, Any] = {
-        "model": model_name_str,
-        "include_response_headers": True,
+    header_parsers = {
+        "x-ratelimit-limit-requests": int,
+        "x-ratelimit-limit-tokens": int,
+        "x-ratelimit-remaining-requests": int,
+        "x-ratelimit-remaining-tokens": int,
+        # "x-ratelimit-reset-requests": parse_reset,
+        # "x-ratelimit-reset-tokens": parse_reset,
     }
-    if temperature is not None:
-        kwargs["temperature"] = temperature
-    if max_tokens is not None:
-        kwargs["max_tokens"] = max_tokens
 
-    llm = ChatOpenAI(**kwargs)
-    setattr(llm, "_registered_model_name", model_name_str)
-    return llm
+    for key, parser in header_parsers.items():
+        if key in header_payload:
+            formatted[key] = parser(header_payload[key])
 
+    if "total_tokens" in token_usage:
+        formatted["total_tokens"] = int(token_usage["total_tokens"])
 
-def _coerce_text(value: Any) -> str:
-    if isinstance(value, str):
-        return value
-    content = getattr(value, "content", None)
-    if isinstance(content, str):
-        return content
-    return str(value)
+    return formatted
 
 
-def _build_llm_chain(
-    llm: Any, prompt_text: str, parser: Any
-) -> LLMChainResources:
-    template_text = prompt_text.strip()
-    if "{format_instructions}" not in template_text:
-        template_text = f"{template_text}\n\n{{format_instructions}}"
+def extract_headers(
+    message: Any | Dict, model_name: str | None = None
+) -> Dict[str, Any]:
+    if model_name is None:
+        model_name = message.get("model_name")
+        if not model_name:
+            raise ValueError("model_name must be provided or present in the message.")
 
-    prompt = PromptTemplate.from_template(template_text).partial(
-        format_instructions=parser.get_format_instructions()
+    metadata = getattr(message, "response_metadata", None) or {}
+    headers = metadata.get("headers") if isinstance(metadata, dict) else None
+    token_usage = metadata.get("token_usage") if isinstance(metadata, dict) else None
+    header_payload: Dict[str, Any]
+    if headers is None:
+        header_payload = {}
+    elif isinstance(headers, dict):
+        header_payload = dict(headers)
+    else:
+        try:
+            header_payload = {str(key): value for key, value in headers.items()}  # type: ignore[attr-defined]
+        except (AttributeError, TypeError):
+            header_payload = {"raw": headers}
+
+    formatted_headers = format_headers(
+        model_name=model_name,
+        header_payload=header_payload,
+        token_usage=token_usage or {},
     )
-    return LLMChainResources(prompt=prompt, llm=llm, parser=parser)
+    return formatted_headers
 
 
-def _extract_items(parsed_output: Any) -> List[str]:
-    if isinstance(parsed_output, PlannerList):
-        return parsed_output.items
-    if isinstance(parsed_output, dict) and "items" in parsed_output:
-        items = parsed_output.get("items")
-        if isinstance(items, list):
-            return [str(item) for item in items]
-    raise ParsingError(
-        "Parsed output did not contain an 'items' list.",
-        details={"parsed_output": repr(parsed_output)},
-    )
+# ! llm
+def _resolve_temperature(
+    model_name: ModelNames, temperature: float | None
+) -> float | None:
+    if temperature is None:
+        return None
+    if model_name in _DEFAULT_TEMPERATURE_ONLY_MODELS:
+        if temperature not in (1, 1.0):
+            logger.warning(
+                "Model %s only supports its default temperature; ignoring %s",
+                model_name.value,
+                temperature,
+            )
+        return None
+    return temperature
+
+
+def _tag_llm_model(llm: Any, model_name: str) -> None:
+    setattr(llm, "_registered_model_name", model_name)
 
 
 def _resolve_llm_model_name(llm: Any) -> str:
@@ -123,214 +116,137 @@ def _resolve_llm_model_name(llm: Any) -> str:
     return "unknown"
 
 
-def _extract_headers(message: Any, llm: Any) -> Dict[str, Any]:
-    metadata = getattr(message, "response_metadata", None) or {}
-    headers = metadata.get("headers") if isinstance(metadata, dict) else None
-    token_usage = metadata.get("token_usage") if isinstance(metadata, dict) else None
-
-    if isinstance(headers, dict):
-        header_payload: Dict[str, Any] = dict(headers)
-    elif headers is None:
-        header_payload = {}
-    else:
-        header_payload = {"raw": headers}
-
-    return {
-        "model_name": _resolve_llm_model_name(llm),
-        "headers": header_payload,
-        "token_usage": token_usage or {},
-    }
-
-
-def _store_headers(
-    state: Dict[str, Any],
-    headers: Dict[str, Any],
-    state_headers_dict_key="headers_dict",
-) -> None:
-    headers_dict = state.get(state_headers_dict_key)
-    if headers_dict is None:
-        headers_dict = {}
-    model_name = headers.get("model_name") or "unknown"
-    headers_dict[model_name] = headers
-    state[state_headers_dict_key] = headers_dict
-
-
-def _execute_with_retries(
-    name: str,
-    operation: Callable[[], Tuple[NodeResult, Dict[str, Any]]],
-    max_retries: int,
-) -> Tuple[NodeResult, Dict[str, Any]]:
-    attempts = max_retries + 1
-    last_error: Exception | None = None
-
-    for attempt in range(1, attempts + 1):
+def _prompt_value_to_input(prompt_value: PromptValue | str) -> Any:
+    if hasattr(prompt_value, "to_messages"):
         try:
-            result, headers = operation()
-            logger.info("%s succeeded on attempt %s", name, attempt)
-            return result, headers
-        except (ParsingError, LLMError) as exc:
-            last_error = exc
-            logger.warning(
-                "%s failed on attempt %s/%s: %s", name, attempt, attempts, exc
-            )
+            return prompt_value.to_messages()
+        except NotImplementedError:
+            pass
+    if hasattr(prompt_value, "to_string"):
+        return prompt_value.to_string()
+    return prompt_value
 
-    raise GraphExecutionError(
-        f"{name} failed after {attempts} attempts.",
-        details={"node": name, "error": str(last_error) if last_error else ""},
+
+@dataclass
+class LLMChainResources:
+    prompt: PromptTemplate
+    llm: Any
+    parser: Any | None = None
+    format_instructions: str = ""
+
+    @property
+    def returns_pydantic(self) -> bool:
+        return isinstance(self.parser, PydanticOutputParser)
+
+    def run(self, inputs: Dict[str, Any]) -> tuple[Any, Dict[str, Any]]:
+        prompt_value = self.prompt.invoke(inputs)
+        llm_input = _prompt_value_to_input(prompt_value)
+        raw_output = self.llm.invoke(llm_input)
+        parsed_output = (
+            self.parser.invoke(raw_output) if self.parser is not None else raw_output
+        )
+        model_name = _resolve_llm_model_name(self.llm)
+        headers = extract_headers(raw_output, model_name=model_name)
+        return parsed_output, headers
+
+
+def _build_llm_chain(
+    llm: Any,
+    prompt_text: str,
+    parser: Any | None = None,
+    *,
+    skip_parser: bool = False,
+) -> LLMChainResources:
+    prompt = PromptTemplate.from_template(prompt_text)
+    if skip_parser:
+        return LLMChainResources(prompt=prompt, llm=llm)
+
+    parser = parser or StrOutputParser()
+    format_instructions = (
+        parser.get_format_instructions()  # type: ignore[attr-defined]
+        if isinstance(parser, PydanticOutputParser)
+        else ""
+    )
+    return LLMChainResources(
+        prompt=prompt,
+        llm=llm,
+        parser=parser,
+        format_instructions=format_instructions,
     )
 
 
-def make_goal_node(
-    goal_chain: LLMChainResources,
-    max_retries: int,
-) -> Callable[[PlannerState], PlannerState]:
-    def goal_node(state: PlannerState) -> PlannerState:
-        def _run_goal() -> Tuple[NodeResult, Dict[str, Any]]:
-            raw_text, parsed_output, headers = goal_chain.run(
-                {"user_query": state["user_query"]}
-            )
-            items = _extract_items(parsed_output)
-            return NodeResult(raw_output=raw_text, items=items), headers
-
-        result, headers = _execute_with_retries(
-            "GoalNode", _run_goal, max_retries=max_retries
-        )
-        state["subgoals"] = result.items
-        state["raw_goal_output"] = result.raw_output
-        _store_headers(state, headers)
-        return state
-
-    return goal_node
-
-
-def make_task_node(
-    task_chain: LLMChainResources,
-    max_retries: int,
-) -> Callable[[PlannerState], PlannerState]:
-    def task_node(state: PlannerState) -> PlannerState:
-        subgoals = state.get("subgoals", []) or []
-        context_value = state.get("context") or "N/A"
-        task_results: List[Dict[str, Any]] = []
-
-        for subgoal in subgoals:
-
-            def _run_task(subgoal: str = subgoal) -> Tuple[NodeResult, Dict[str, Any]]:
-                raw_text, parsed_output, headers = task_chain.run(
-                    {"subgoal": subgoal, "context": context_value}
-                )
-                items = _extract_items(parsed_output)
-                return NodeResult(raw_output=raw_text, items=items), headers
-
-            result, headers = _execute_with_retries(
-                "TaskNode", _run_task, max_retries=max_retries
-            )
-            task_results.append(
-                {
-                    "subgoal": subgoal,
-                    "subtasks": result.items,
-                    "raw_output": result.raw_output,
-                }
-            )
-            _store_headers(state, headers)
-
-        state["tasks"] = task_results
-        return state
-
-    return task_node
+def create_llm(
+    model_name: ModelNames,
+    temperature: float = 0.0,
+    prompt_cache_key: str | None = None,
+    bind_tools: bool = False,
+):
+    model_name_str = model_name.value
+    extra_body: Dict[str, Any] | None = None
+    if prompt_cache_key:
+        extra_body = {"prompt_cache_key": prompt_cache_key}
+    resolved_temperature = _resolve_temperature(model_name, temperature)
+    llm_kwargs: Dict[str, Any] = {
+        "model": model_name_str,
+        "include_response_headers": True,
+    }
+    if resolved_temperature is not None:
+        llm_kwargs["temperature"] = resolved_temperature
+    if extra_body:
+        llm_kwargs["extra_body"] = extra_body
+    llm = ChatOpenAI(**llm_kwargs)
+    if bind_tools:
+        logger.info("Binding tools to LLM model with %s", prompt_cache_key)
+        llm = llm.bind_tools(tools)
+    _tag_llm_model(llm, model_name_str)
+    return llm
 
 
-def make_action_node(
-    action_chain: LLMChainResources,
-    max_retries: int,
-) -> Callable[[PlannerState], PlannerState]:
-    def action_node(state: PlannerState) -> PlannerState:
-        tasks = state.get("tasks", []) or []
-        action_details: List[Dict[str, Any]] = []
-        merged_actions: List[str] = []
-
-        for task in tasks:
-            for subtask in task.get("subtasks", []):
-
-                def _run_action(
-                    subtask: str = subtask,
-                ) -> Tuple[NodeResult, Dict[str, Any]]:
-                    raw_text, parsed_output, headers = action_chain.run(
-                        {"subtask": subtask}
-                    )
-                    items = _extract_items(parsed_output)
-                    return NodeResult(raw_output=raw_text, items=items), headers
-
-                result, headers = _execute_with_retries(
-                    "ActionNode", _run_action, max_retries=max_retries
-                )
-                action_details.append(
-                    {
-                        "subtask": subtask,
-                        "actions": result.items,
-                        "raw_output": result.raw_output,
-                    }
-                )
-                merged_actions.extend(result.items)
-                _store_headers(state, headers)
-
-        state["action_details"] = action_details
-        state["actions"] = merged_actions
-        return state
-
-    return action_node
-
-
-def create_planner_graph(
+# ! component
+def make_component(
+    llm,
+    prompt_text: str,
+    make_inputs: Callable,
+    parser_output=None,
+    state_key="history",
+    state_append=True,
+    component_name="COMPONENT",
+    printout=True,
+    withtout_output_parser=False,
     *,
-    llm: Any,
-    goal_prompt: str,
-    task_prompt: str,
-    action_prompt: str,
-    max_retries: int,
-    thread_id: str = "planner",
-    save_graph_png: bool = False,
-) -> Tuple[Any, Dict[str, Any]]:
-    goal_parser = create_planner_list_parser()
-    task_parser = create_planner_list_parser()
-    action_parser = create_planner_list_parser()
+    skip_parser: bool | None = None,
+) -> StateCallable:
 
-    goal_chain = _build_llm_chain(llm, goal_prompt, goal_parser)
-    task_chain = _build_llm_chain(llm, task_prompt, task_parser)
-    action_chain = _build_llm_chain(llm, action_prompt, action_parser)
+    effective_skip_parser = (
+        skip_parser if skip_parser is not None else withtout_output_parser
+    )
+    parser = (
+        PydanticOutputParser(pydantic_object=parser_output)
+        if parser_output is not None
+        else None
+    )
+    chain_resources = _build_llm_chain(
+        llm,
+        prompt_text,
+        parser=parser,
+        skip_parser=effective_skip_parser,
+    )
 
-    workflow = StateGraph(state_schema=PlannerState)
-    workflow.add_node("goal_planner", make_goal_node(goal_chain, max_retries))
-    workflow.add_node("task_planner", make_task_node(task_chain, max_retries))
-    workflow.add_node("action_planner", make_action_node(action_chain, max_retries))
+    def component(state):
+        logger.info(f"============= {component_name} ==============")
+        inputs = make_inputs(state, chain_resources.format_instructions)
+        result, headers = chain_resources.run(inputs)
+        if chain_resources.returns_pydantic:
+            result = result.model_dump()
 
-    workflow.add_edge(START, "goal_planner")
-    workflow.add_edge("goal_planner", "task_planner")
-    workflow.add_edge("task_planner", "action_planner")
-    workflow.add_edge("action_planner", END)
+        if state_append:
+            state[state_key].append(result)
+        else:
+            state[state_key] = result
 
-    graph = workflow.compile(checkpointer=None)
+        if printout:
+            logger.info(f"AI Answer:\n{result}\n")
 
-    if save_graph_png:
-        try:
-            from langchain_core.runnables.graph_png import PngDrawer
+        return state
 
-            drawer = PngDrawer()
-            drawer.draw(graph.get_graph(), "./planner_graph.png")
-            logger.info("Saved planner_graph.png")
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Failed to save planner graph PNG: %s", exc)
-
-    config = {"configurable": {"thread_id": thread_id}}
-    return graph, config
-
-
-__all__ = [
-    "NodeResult",
-    "PlannerState",
-    "LLMChainResources",
-    "create_llm",
-    "create_planner_graph",
-    "make_goal_node",
-    "make_task_node",
-    "make_action_node",
-]
+    return component
