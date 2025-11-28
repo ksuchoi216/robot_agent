@@ -195,9 +195,9 @@ def create_llm(
     if extra_body:
         llm_kwargs["extra_body"] = extra_body
     llm = ChatOpenAI(**llm_kwargs)
-    if bind_tools:
-        logger.info("Binding tools to LLM model with %s", prompt_cache_key)
-        llm = llm.bind_tools(tools)
+    # if bind_tools:
+    # logger.info("Binding tools to LLM model with %s", prompt_cache_key)
+    # llm = llm.bind_tools(tools)
     _tag_llm_model(llm, model_name_str)
     return llm
 
