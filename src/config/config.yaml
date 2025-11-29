@@ -14,12 +14,10 @@ runner:
     prompt_cache_key: action_node
 
 
-robot_skills:
-  robot1:
-    name: robot1
+skills:
+  - name: robot1
     skills: ['GoToObject', 'OpenObject', "CloseObject", 'PickObject', "PlaceObject"]
-  robot2:
-    name: robot2
+  - name: robot2
     skills: ['GoToObject', 'OpenObject', "CloseObject", 'PickObject', "PlaceObject"]
 
 tasks:
@@ -40,7 +38,7 @@ tasks:
     template: "PlaceObject <robot><object><receptacleObject>"
 
 
-action:
+actions:
   MoveAhead:
     description: "Move the robot ahead by a certain distance."
     template: "MoveAhead <robot><distance>"

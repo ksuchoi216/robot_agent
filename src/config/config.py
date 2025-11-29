@@ -1,3 +1,4 @@
+from asyncio import tasks
 from pathlib import Path
 from typing import Any
 
@@ -27,10 +28,18 @@ class RunnerConfig(BaseModel):
     action_node: NodeConfig
 
 
+class RobotSkillConfig(BaseModel):
+    name: str
+    skills: list[str]
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
     paths: PathsConfig
     runner: RunnerConfig
+    skills: list[RobotSkillConfig]
+    tasks: dict[str, dict[str, Any]]
+    actions: dict[str, dict[str, Any]]
 
 
 def load_config(config_path: str | Path | None = None) -> Config:
