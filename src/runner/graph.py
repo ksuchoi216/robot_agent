@@ -26,6 +26,8 @@ _DEFAULT_TEMPERATURE_ONLY_MODELS: set[ModelNames] = {
     ModelNames.gpt5nano,
 }
 
+logger = get_logger(__name__)
+
 
 # ! headers
 def format_headers(
@@ -203,14 +205,14 @@ def create_llm(
 
 
 # ! component
-def make_component(
+def make_node(
     llm,
     prompt_text: str,
     make_inputs: Callable,
     parser_output=None,
     state_key="history",
     state_append=True,
-    component_name="COMPONENT",
+    node_name="NODE",
     printout=True,
     withtout_output_parser=False,
     *,
@@ -232,8 +234,8 @@ def make_component(
         skip_parser=effective_skip_parser,
     )
 
-    def component(state):
-        logger.info(f"============= {component_name} ==============")
+    def node(state):
+        logger.info(f"============= {node_name} ==============")
         inputs = make_inputs(state, chain_resources.format_instructions)
         result, headers = chain_resources.run(inputs)
         if chain_resources.returns_pydantic:
@@ -249,4 +251,4 @@ def make_component(
 
         return state
 
-    return component
+    return node

@@ -18,11 +18,9 @@ class Runner:
     def __init__(
         self,
         config: Config,
-        result_key: str,
         token_information_changed_callback: Callable | None = None,
     ):
         self.config = config
-        self.result_key = result_key
         self.graph: Any | None = None
         self.graph_config: Dict[str, Any] | None = None
         self.retriever = None
@@ -80,42 +78,15 @@ class Runner:
             )
         return self.graph, self.graph_config
 
-    def get_result_from_states(self, states, return_last=True):
-        state_list = states if isinstance(states, list) else [states]
-
-        def extract_result(state):
-            value = state[self.result_key]
-            return value[-1] if return_last else value
-
-        def extract_headers(state):
-            headers_dict = state.get("headers_dict", {})
-            return headers_dict
-
-        results = [extract_result(state) for state in state_list]
-        headers = [extract_headers(state) for state in state_list]
-        final_result = results[0] if len(results) == 1 else results
-        final_headers = headers[0] if len(headers) == 1 else headers
-
-        return {
-            "result": final_result,
-            "state": state_list,
-            "headers": final_headers,
-        }
-
     def invoke(self, state):
         graph, graph_config = self._ensure_graph()
         final_state = graph.invoke(state, graph_config)
-        return self.get_result_from_states(final_state)
-
-    async def ainvoke(self, state):
-        graph, graph_config = self._ensure_graph()
-        final_state = await graph.ainvoke(state, graph_config)
-        return self.get_result_from_states(final_state)
+        return final_state
 
     def batch(self, states):
         graph, graph_config = self._ensure_graph()
         final_states = graph.batch(states, graph_config)
-        return [self.get_result_from_states(state) for state in final_states]
+        return final_states
 
 
 class PlanRunner(Runner):
