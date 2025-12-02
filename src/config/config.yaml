@@ -9,9 +9,6 @@ runner:
   task_node:
     model_name: gpt41mini
     prompt_cache_key: task_node
-  action_node:
-    model_name: gpt41mini
-    prompt_cache_key: action_node
 
 
 skills:
@@ -38,26 +35,26 @@ tasks:
     template: "PlaceObject <robot><object><receptacleObject>"
 
 
-actions:
-  MoveAhead:
-    description: "Move the robot ahead by a certain distance."
-    template: "MoveAhead <robot><distance>"
-  MoveBack:
-    description: "Move the robot back by a certain distance."
-    template: "MoveBack <robot><distance>"
-  RotateLeft:
-    description: "Rotate the robot to the left by a certain angle."
-    template: "RotateLeft <robot><angle>"
-  RotateRight:
-    description: "Rotate the robot to the right by a certain angle."
-    template: "RotateRight <robot><angle>"
-  PickObject:
-    description: "Pick up the specified object."
-    template: "PickObject <robot><object>"
-  PlaceObject:
-    description: "Place the specified object at the designated location."
-    template: "PlaceObject <robot><object><receptacleObject>"
-  Done:
-    description: "Indicate that the task is completed."
-    template: "Done <robot>"
+# actions:
+#   MoveAhead:
+#     description: "Move the robot ahead by a certain distance."
+#     template: "MoveAhead <robot><distance>"
+#   MoveBack:
+#     description: "Move the robot back by a certain distance."
+#     template: "MoveBack <robot><distance>"
+#   RotateLeft:
+#     description: "Rotate the robot to the left by a certain angle."
+#     template: "RotateLeft <robot><angle>"
+#   RotateRight:
+#     description: "Rotate the robot to the right by a certain angle."
+#     template: "RotateRight <robot><angle>"
+#   PickObject:
+#     description: "Pick up the specified object."
+#     template: "PickObject <robot><object>"
+#   PlaceObject:
+#     description: "Place the specified object at the designated location."
+#     template: "PlaceObject <robot><object><receptacleObject>"
+#   Done:
+#     description: "Indicate that the task is completed."
+#     template: "Done <robot>"
 

@@ -25,7 +25,7 @@ class RunnerConfig(BaseModel):
 
     goal_node: NodeConfig
     task_node: NodeConfig
-    action_node: NodeConfig
+    # action_node: NodeConfig
 
 
 class RobotSkillConfig(BaseModel):
@@ -39,7 +39,7 @@ class Config(BaseModel):
     runner: RunnerConfig
     skills: list[RobotSkillConfig]
     tasks: dict[str, dict[str, Any]]
-    actions: dict[str, dict[str, Any]]
+    # actions: dict[str, dict[str, Any]]
 
 
 def load_config(config_path: str | Path | None = None) -> Config:

@@ -1,67 +1,12 @@
-"""Centralized logging helpers for the MLDT planner."""
-
-from __future__ import annotations
+"""Centralized logging helpers."""
 
 import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Optional
 
 _CONFIGURED = False
-_FILE_HANDLERS: Dict[Tuple[str, str], logging.Handler] = {}
-_DEFAULT_LOG_DIR = Path("logs")
-_ROTATION_BYTES = 2 * 1024 * 1024  # 2MB
-_BACKUP_COUNT = 3
-
-
-def _configure_logger() -> None:
-    """Configure the root logger once."""
-    global _CONFIGURED
-    if _CONFIGURED:
-        return
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
-    _CONFIGURED = True
-
-
-def _default_log_filename(logger_name: str) -> str:
-    safe_name = logger_name.replace(".", "_")
-    return str(_DEFAULT_LOG_DIR / f"{safe_name}.log")
-
-
-def _ensure_file_handler(logger: logging.Logger, filename: str) -> None:
-    """Attach a file handler to the logger for the given filename."""
-    file_path = Path(filename).expanduser()
-    key = (logger.name, str(file_path))
-
-    if key in _FILE_HANDLERS:
-        return
-
-    if file_path.parent and not file_path.parent.exists():
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-
-    handler = RotatingFileHandler(
-        str(file_path),
-        encoding="utf-8",
-        maxBytes=_ROTATION_BYTES,
-        backupCount=_BACKUP_COUNT,
-    )
-    handler.setFormatter(
-        logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-    )
-    logger.addHandler(handler)
-    _FILE_HANDLERS[key] = handler
-
-
-def _remove_logger_file_handlers(logger: logging.Logger) -> None:
-    """Detach and close all file handlers registered for the logger."""
-    keys_to_remove = [key for key in _FILE_HANDLERS if key[0] == logger.name]
-    for key in keys_to_remove:
-        handler = _FILE_HANDLERS.pop(key)
-        logger.removeHandler(handler)
-        handler.close()
+_LOGGERS = set()
 
 
 def get_logger(
@@ -69,19 +14,56 @@ def get_logger(
     filename: Optional[str] = None,
     is_save: bool = False,
 ) -> logging.Logger:
-    """Return a module-level logger, ensuring configuration exists.
+    """Return a configured logger.
 
-    Logs are persisted by default to `logs/<logger_name>.log` unless `is_save=False`.
-    Provide `filename` to override the destination.
+    Args:
+        name: Logger name (defaults to root logger)
+        filename: Log file path (defaults to logs/<logger_name>.log)
+        is_save: Whether to save logs to file
+
+    Returns:
+        Configured logger instance
     """
-    _configure_logger()
-    logger_name = name if name else "oneit_interview_ai_module"
+    global _CONFIGURED
+
+    # Configure root logger once
+    if not _CONFIGURED:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        )
+        _CONFIGURED = True
+
+    logger_name = name or "robot_agent"
     logger = logging.getLogger(logger_name)
 
+    # Prevent duplicate handlers
+    if logger_name in _LOGGERS:
+        return logger
+
+    _LOGGERS.add(logger_name)
+
     if is_save:
-        target_filename = filename if filename else _default_log_filename(logger_name)
-        _ensure_file_handler(logger, target_filename)
-    else:
-        _remove_logger_file_handlers(logger)
+        # Determine log file path
+        if filename:
+            log_path = Path(filename).expanduser()
+        else:
+            safe_name = logger_name.replace(".", "_")
+            log_path = Path("logs") / f"{safe_name}.log"
+
+        # Create log directory if needed
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Add file handler
+        handler = RotatingFileHandler(
+            str(log_path),
+            encoding="utf-8",
+            maxBytes=2 * 1024 * 1024,  # 2MB
+            backupCount=3,
+        )
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+        )
+        logger.addHandler(handler)
 
     return logger

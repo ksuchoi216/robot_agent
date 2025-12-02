@@ -49,10 +49,13 @@ def make_task_node_inputs(
     state,
 ):
     def make_subgoals_text(subgoals):
+        subgoals = subgoals.get("subgoals", [])
+
         return "\n".join([f"{i+1}. {subgoal}" for i, subgoal in enumerate(subgoals)])
 
     inputs = state.get("inputs", {})
     subgoals_text = make_subgoals_text(state.get("subgoals", []))
+    print(f"Subgoals Text:\n{subgoals_text}\n")
 
     return {
         "skill_text": inputs.get("skill_text", ""),
@@ -64,26 +67,25 @@ def make_task_node_inputs(
 TASK_NODE_PROMPT = """
 # Role
 You are the Task-Level Planner in the MLDT pipeline.  
-Given a single subgoal from the Goal Node, decompose it into **meaningful task steps** the robot must perform.
-
+Given a single subgoal from the Goal Node, your job is to decompose it into an ordered sequence of **semantic tasks** that the robot can perform using its built-in skills.
 # Process
 1. Analyze the provided subgoal carefully.
-2. Find objects mentioned in the subgoal using the object information.
+2. Find objects mentioned in the subgoal using <object_text>.
+    no need to use all objects, only those relevant to the subgoal.
 3. Devise a sequence of task steps using the available robot skills to achieve the subgoal
-4. Ensure each step is a **semantic task**, not a primitive action.
-
+    provided in <skill_text>.
+4. Each task step must specify:
+    - the skill to use,
+    - the target(object or group) for that skill.,
 
 # Instructions
-- Each step must be a **semantic task**, not a primitive action.
-- robot_skills are **reference only**, do not simply repeat them.
-- object information is used only to **reason about context**.
+- robot_skills are defined in <skill_text>.
+- objects are used in <object_text>.
 - Task steps must be **short, natural, ordered**, and easy to follow.
-- Include logically necessary steps (e.g., opening/closing doors) if needed.
-- Output must be a **Python list-style string**.
 
 # Few-shot Examples
-<Example1>
-[Input]
+## Example 1
+### Input
 <skill_text>
 ["from robot1.skills import GoToObject, PickObject, PlaceObject"]
 </skill_text>
@@ -96,16 +98,46 @@ Given a single subgoal from the Goal Node, decompose it into **meaningful task s
 </object_text>
 
 <subgoals_text>
-['put the fork in the bowl']
+1. put the fork in the bowl
 </subgoals_text>
 
-[Output]
+### Output
+[{{
+    "task": 'put the fork in the bowl',
+    "subtasks": [
+        {{'skill': 'GoToObject', 'target': 'object_fork_0'}},
+        {{'skill': 'PickObject', 'target': 'object_fork_0'}},
+        {{'skill': 'GoToObject', 'target': 'object_bowl_0'}},
+        {{'skill': 'PlaceObject', 'target': 'object_bowl_0'}}
+    ]
+}}]
+
+## Example 2
+### Input
+<skill_text>
+["from robot1.skills import GoToObject, PickObject, PlaceObject"]
+</skill_text>
+
+<object_text>
 [
-    {{'skill': 'GoToObject', 'object': 'object_fork_0'}},
-    {{'skill': 'PickObject', 'object': 'object_fork_0'}},
-    {{'skill': 'GoToObject', 'object': 'object_bowl_0'}},
-    {{'skill': 'PlaceObject', 'object': 'object_bowl_0'}}
+    {{'object_name' : 'object_apple_0', 'object_in_group': 'island_right_group'}}, 
 ]
+</object_text>
+
+<subgoals_text>
+1. put the apple on the island table
+</subgoals_text>
+
+### Output
+[{{
+    "task": 'put the apple on the island table',
+    "subtasks": [
+        {{'skill': 'GoToObject', 'target': 'object_apple_0'}},
+        {{'skill': 'PickObject', 'target': 'object_apple_0'}},
+        {{'skill': 'GoToObject', 'target': 'island_right_group'}},
+        {{'skill': 'PlaceObject', 'target': 'island_right_group'}}
+    ]
+}}]
 
 # Input Components
 1. robot_skills  
@@ -134,11 +166,16 @@ Return ONLY the structured output that matches the JSON schema below.
 
 class SubTask(BaseModel):
     skill: str
-    object: str
+    target: str
+
+
+class SubGoal(BaseModel):
+    subgoal: str
+    tasks: List[SubTask]
 
 
 class TaskNodeParser(BaseModel):
-    tasks: List[SubTask]
+    tasks: List[SubGoal]
 
 
 # 3. groups

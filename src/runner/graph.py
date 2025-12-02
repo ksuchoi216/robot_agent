@@ -18,7 +18,6 @@ from ..common.errors import LLMError, RateLimitExceededError
 from ..common.logger import get_logger
 from .state import PlannerState
 
-logger = get_logger(__name__)
 StateCallable = Callable[[Any], Any]
 RouterCallable = Callable[[Any], str]
 
@@ -326,44 +325,3 @@ def make_planning_graph(state_schema, goal_node, task_node, thread_id="default")
     graph = workflow.compile(checkpointer=None)
     config = {"configurable": {"thread_id": thread_id}}
     return graph, config
-
-
-# def create_fact_checker_graph(
-#     fact_checker,
-#     fact_checker_regenerator,
-#     state_schema,
-#     thread_id: str = "default",
-#     save_graph_png: bool = False,
-# ):
-
-#     workflow = StateGraph(state_schema=state_schema)
-#     # * ============================================================
-#     workflow.add_node("fact_checker", fact_checker)
-#     workflow.add_node("fact_checker_regenerator", fact_checker_regenerator)
-#     workflow.add_node("web_search", tool_node)
-#     workflow.add_node("end_node", ai_answer_end_node)
-
-#     # * ============================================================
-#     workflow.add_edge(START, "fact_checker")
-#     workflow.add_conditional_edges(
-#         "fact_checker",
-#         fact_checker_router,
-#         {
-#             "continue": "web_search",
-#             "end": "fact_checker_regenerator",
-#         },
-#     )
-#     workflow.add_edge("web_search", "fact_checker")
-#     workflow.add_edge("fact_checker_regenerator", "end_node")
-#     workflow.add_edge("end_node", END)
-
-#     # memory = MemorySaver()
-#     # graph = workflow.compile(checkpointer=memory)
-#     graph = workflow.compile(checkpointer=None)
-
-#     if save_graph_png:
-#         drawer = PngDrawer()
-#         drawer.draw(graph.get_graph(), "./graph_fact_checker.png")
-#         logger.info("Saved graph_fact_checker.png")
-#     config = {"configurable": {"thread_id": thread_id}}
-#     return graph, config
