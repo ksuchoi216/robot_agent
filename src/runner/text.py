@@ -9,7 +9,7 @@ def make_object_text(url, object_name=None):
     objects_by_group = all["objects_by_group"]
     ungrouped_objects = all["ungrouped_objects"]
 
-    total_object_text = ""
+    total_object_text = "{{{{\n"
     for group_name, objects_list in objects_by_group.items():
         if objects_list:
             print(f"Group: {group_name}")
@@ -17,9 +17,12 @@ def make_object_text(url, object_name=None):
                 if object_name is not None:
                     if obj != object_name:
                         continue
-                object_text = f"object {obj} is in group {group_name}\n"
+                object_text = (
+                    f'"object_name": "{obj}", "object_in_group": "{group_name}"\n'
+                )
                 total_object_text += object_text
 
+    total_object_text += "}}}}"
     if ungrouped_objects:
         raise ValueError("There are ungrouped objects in the environment.")
 

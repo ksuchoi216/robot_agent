@@ -74,6 +74,13 @@ class LLMError(BaseServiceError):
     default_status = 502
 
 
+class RateLimitExceededError(LLMError):
+    """Raised when upstream LLM returns a rate-limit or quota error."""
+
+    default_code = "RATE_LIMIT_EXCEEDED"
+    default_status = 429
+
+
 class GraphExecutionError(BaseServiceError):
     """Raised when the planner graph cannot complete execution."""
 
@@ -108,5 +115,6 @@ __all__ = (
     "PromptLoadError",
     "ParsingError",
     "LLMError",
+    "RateLimitExceededError",
     "GraphInitializeError",
 )

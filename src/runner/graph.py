@@ -11,8 +11,10 @@ from langchain_core.prompt_values import PromptValue
 from langchain_core.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
+from openai import APIStatusError, RateLimitError
 
 from ..common.enums import ModelNames
+from ..common.errors import LLMError, RateLimitExceededError
 from ..common.logger import get_logger
 from .state import PlannerState
 
@@ -143,11 +145,64 @@ class LLMChainResources:
     def run(self, inputs: Dict[str, Any]) -> tuple[Any, Dict[str, Any]]:
         prompt_value = self.prompt.invoke(inputs)
         llm_input = _prompt_value_to_input(prompt_value)
-        raw_output = self.llm.invoke(llm_input)
+        model_name = _resolve_llm_model_name(self.llm)
+        try:
+            raw_output = self.llm.invoke(llm_input)
+        except RateLimitError as err:
+            response = getattr(err, "response", None)
+            retry_after = None
+            header_payload: Dict[str, Any] = {}
+            if response is not None:
+                retry_after = getattr(response.headers, "get", lambda *_: None)(
+                    "retry-after"
+                )
+                try:
+                    header_payload = dict(response.headers)
+                except Exception:
+                    header_payload = {"raw": str(response.headers)}
+            ratelimit_headers = format_headers(
+                model_name=model_name,
+                header_payload=header_payload,
+                token_usage={},
+            )
+            logger.error(
+                "Rate limit exceeded for model %s: %s", model_name, str(err).strip()
+            )
+            raise RateLimitExceededError(
+                f"Rate limit hit when calling model {model_name}. "
+                "Reduce request rate or verify quota/billing.",
+                details={
+                    "model_name": model_name,
+                    "retry_after": retry_after,
+                    "ratelimit": ratelimit_headers,
+                },
+            ) from err
+        except APIStatusError as err:
+            response = getattr(err, "response", None)
+            header_payload: Dict[str, Any] = {}
+            if response is not None:
+                try:
+                    header_payload = dict(response.headers)
+                except Exception:
+                    header_payload = {"raw": str(response.headers)}
+            logger.error(
+                "LLM API call failed for model %s with status %s: %s",
+                model_name,
+                getattr(err, "status_code", "unknown"),
+                str(err).strip(),
+            )
+            raise LLMError(
+                f"LLM call failed for model {model_name}",
+                details={
+                    "model_name": model_name,
+                    "status_code": getattr(err, "status_code", None),
+                    "headers": header_payload,
+                    "error": str(err),
+                },
+            ) from err
         parsed_output = (
             self.parser.invoke(raw_output) if self.parser is not None else raw_output
         )
-        model_name = _resolve_llm_model_name(self.llm)
         headers = extract_headers(raw_output, model_name=model_name)
         return parsed_output, headers
 
@@ -191,6 +246,8 @@ def create_llm(
     llm_kwargs: Dict[str, Any] = {
         "model": model_name_str,
         "include_response_headers": True,
+        "max_retries": 5,  # Retry up to 5 times
+        "timeout": 60.0,  # 60 second timeout
     }
     if resolved_temperature is not None:
         llm_kwargs["temperature"] = resolved_temperature
@@ -253,14 +310,16 @@ def make_node(
     return node
 
 
-def make_planning_graph(state_schema, goal_node, thread_id="default"):
+def make_planning_graph(state_schema, goal_node, task_node, thread_id="default"):
     workflow = StateGraph(state_schema=state_schema)
     # * ============================================================
     workflow.add_node("goal_node", goal_node)
+    workflow.add_node("task_node", task_node)
 
     # * ============================================================
     workflow.add_edge(START, "goal_node")
-    workflow.add_edge("goal_node", END)
+    workflow.add_edge("goal_node", "task_node")
+    workflow.add_edge("task_node", END)
 
     # memory = MemorySaver()
     # graph = workflow.compile(checkpointer=memory)

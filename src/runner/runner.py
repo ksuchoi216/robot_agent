@@ -11,7 +11,10 @@ from ..config.config import Config
 from ..prompts.planning_prompt import (
     GOAL_NODE_PROMPT,
     TASK_NODE_PROMPT,
+    GoalNodeParser,
+    TaskNodeParser,
     make_goal_node_inputs,
+    make_task_node_inputs,
 )
 from . import graph as graph_module
 from .state import PlannerState
@@ -103,14 +106,27 @@ class PlanRunner(Runner):
             ),
             prompt_text=GOAL_NODE_PROMPT,
             make_inputs=make_goal_node_inputs,
-            parser_output=None,
+            parser_output=GoalNodeParser,
             state_key="subgoals",
-            state_append=True,
+            state_append=False,
             node_name="GOAL_NODE",
+        )
+        task_node = graph_module.make_node(
+            llm=self._get_llm(
+                model_name=self.config.runner.task_node.model_name,
+                prompt_cache_key="task_node",
+            ),
+            prompt_text=TASK_NODE_PROMPT,
+            make_inputs=make_task_node_inputs,
+            parser_output=TaskNodeParser,
+            state_key="tasks",
+            state_append=False,
+            node_name="TASK_NODE",
         )
 
         return graph_module.make_planning_graph(
             state_schema=PlannerState,
             goal_node=goal_node,
+            task_node=task_node,
             thread_id="planning",
         )

@@ -45,28 +45,35 @@ class GoalNodeParser(BaseModel):
     subgoals: List[str]
 
 
+def make_task_node_inputs(
+    state,
+):
+    def make_subgoals_text(subgoals):
+        return "\n".join([f"{i+1}. {subgoal}" for i, subgoal in enumerate(subgoals)])
+
+    inputs = state.get("inputs", {})
+    subgoals_text = make_subgoals_text(state.get("subgoals", []))
+
+    return {
+        "skill_text": inputs.get("skill_text", ""),
+        "object_text": inputs.get("object_text", ""),
+        "subgoals_text": subgoals_text,
+    }
+
+
 TASK_NODE_PROMPT = """
-# Instruction
+# Role
 You are the Task-Level Planner in the MLDT pipeline.  
 Given a single subgoal from the Goal Node, decompose it into **meaningful task steps** the robot must perform.
 
-# Input Components
-1. robot_skills  
-A list of built-in robot skills.  
-Example:
-{robot_skill_text}
+# Process
+1. Analyze the provided subgoal carefully.
+2. Find objects mentioned in the subgoal using the object information.
+3. Devise a sequence of task steps using the available robot skills to achieve the subgoal
+4. Ensure each step is a **semantic task**, not a primitive action.
 
-2. observation  
-Information about the objects currently present in the environment.  
-Example:
-{objects}
 
-3. task_query  
-A single subgoal provided by the Goal Node.  
-Example:
-"{task_query}"
-
-# Principles
+# Instructions
 - Each step must be a **semantic task**, not a primitive action.
 - robot_skills are **reference only**, do not simply repeat them.
 - object information is used only to **reason about context**.
@@ -77,50 +84,65 @@ Example:
 # Few-shot Examples
 <Example1>
 [Input]
-objects: [
-    {{"name": "apple", "position": "fridge"}},
-    {{"name": "table", "position": "kitchen"}}
+<skill_text>
+["from robot1.skills import GoToObject, PickObject, PlaceObject"]
+</skill_text>
+
+<object_text>
+[
+    {{'object_name' : 'object_bowl_0', 'object_in_group': 'counter_1_left_group'}}, 
+    {{'object_name' : 'object_fork_0', 'object_in_group': 'island_left_group'}}
 ]
-robot: [
-    {{"name": "alice", ""}}
+</object_text>
+
+<subgoals_text>
+['put the fork in the bowl']
+</subgoals_text>
+
+[Output]
+[
+    {{'skill': 'GoToObject', 'object': 'object_fork_0'}},
+    {{'skill': 'PickObject', 'object': 'object_fork_0'}},
+    {{'skill': 'GoToObject', 'object': 'object_bowl_0'}},
+    {{'skill': 'PlaceObject', 'object': 'object_bowl_0'}}
 ]
 
-CODE:
-def bring_apple_to_table():
-    Step 1: GoToObject('Fridge')
-    Step 2: OpenObject('Fridge')
-    Step 3: PickObject('Apple')
-    Step 4: GoToObject('Table')
-    Step 5: PlaceObject('Apple', 'Table')
-    Step 6: CloseObject('Fridge')
+# Input Components
+1. robot_skills  
+A list of built-in robot skills.  
+<skill_text>
+{skill_text}
+</skill_text>
 
-Execute SubTask 1:
-bring_apple_to_table()
+2. observation  
+Information about the objects currently present in the environment.  
+<object_text>
+{object_text}
+</object_text>
 
-Task bring apple to the table is done.
-</Example1>
-<Example2>
-Task Description: Move the book to the living room sofa.
-
-General Task Decomposition:
-This task consists of a single subtask:
-SubTask 1: Move the book from the cabinet to the sofa.
-Required skills include: GoToObject, PickObject, PlaceObject.
-
-CODE:
-def move_book_to_sofa():
-    Step 1: GoToObject('Cabinet')
-    Step 2: PickObject('Book')
-    Step 3: GoToObject('Sofa')
-    Step 4: PlaceObject('Book', 'Sofa')
-
-Execute SubTask 1:
-move_book_to_sofa()
-
-Task move book to sofa is done.
-</Example2>
+3. subgoals
+sub-goals provided by the Goal Node.
+<subgoals_text>
+{subgoals_text}
+</subgoals_text>
 
 # Output Format
 Return ONLY the structured output that matches the JSON schema below.
 {format_instructions}
 """
+
+
+class SubTask(BaseModel):
+    skill: str
+    object: str
+
+
+class TaskNodeParser(BaseModel):
+    tasks: List[SubTask]
+
+
+# 3. groups
+# Information about object groupings in the environment.
+# <groups_text>
+# {groups_text}
+# </groups_text>

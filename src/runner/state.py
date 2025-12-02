@@ -43,8 +43,8 @@ class PlannerStateMaker:
 
     def make_inputs(self):
         inputs = {}
-        object_text_dict = make_object_text(self.url)
-        inputs["object_text_dict"] = object_text_dict
+        object_text = make_object_text(self.url)
+        inputs["object_text"] = object_text
         inputs["skill_text"] = make_skill_text(self.config.skills)
         return inputs
 
