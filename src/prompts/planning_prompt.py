@@ -1,7 +1,18 @@
+from typing import Callable, List
+
+from pydantic import BaseModel
+
+
+def make_goal_node_inputs(state):
+    return {
+        "user_query": state["user_query"],
+    }
+
+
 GOAL_NODE_PROMPT = """
 # Instruction
 You are the Goal-Level Planner in the MLDT pipeline.  
-Your job is to decompose the user’s command into **independent high-level subgoals** that the robot must achieve.
+Your job is to decompose the user's command into **independent high-level subgoals** that the robot must achieve.
 
 Rules:
 - Each subgoal should represent **one distinct, clear objective**.
@@ -9,7 +20,7 @@ Rules:
 - Do NOT describe **motion paths, tool manipulation, or detailed actions**.  
   (They will be handled in the Task/Action levels.)
 - Keep each subgoal **short, natural, and faithful to the original meaning**.
-- Preserve the user’s original order.
+- Preserve the user's original order.
 
 # Example
 User input:
@@ -28,6 +39,12 @@ Output:
 Return ONLY the structured output that matches the JSON schema below.
 {format_instructions}
 """
+
+
+class GoalNodeParser(BaseModel):
+    subgoals: List[str]
+
+
 TASK_NODE_PROMPT = """
 # Instruction
 You are the Task-Level Planner in the MLDT pipeline.  
@@ -58,40 +75,6 @@ Example:
 - Output must be a **Python list-style string**.
 
 # Few-shot Examples
-Example 1  
-Subgoal: "Bring the apple to the table"  
-objects: [
-    {{"name": "apple", "position": "fridge"}},
-    {{"name": "table", "position": "kitchen"}}
-]
-Output:
-[
-    "Open the fridge",
-    "Pick up the apple",
-    "Move the apple to the table",
-    "Close the fridge door"
-]
-
-Example 2  
-Subgoal: "Move the book to the living room sofa"  
-objects: [
-    {{"name": "book", "position": "cabinet"}},
-    {{"name": "sofa", "position": "living_room"}}
-]
-Output:
-[
-    "Go to the cabinet",
-    "Pick up the book",
-    "Move the book to the sofa"
-]
-
-# Output Format
-Return ONLY the structured output that matches the JSON schema below.
-{format_instructions}
-"""
-
-
-TASK_FEW_SHOTS = """
 <Example1>
 [Input]
 objects: [
@@ -136,4 +119,8 @@ move_book_to_sofa()
 
 Task move book to sofa is done.
 </Example2>
+
+# Output Format
+Return ONLY the structured output that matches the JSON schema below.
+{format_instructions}
 """

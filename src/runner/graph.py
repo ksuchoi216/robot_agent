@@ -207,6 +207,7 @@ def create_llm(
 # ! component
 def make_node(
     llm,
+    *,
     prompt_text: str,
     make_inputs: Callable,
     parser_output=None,
@@ -214,14 +215,9 @@ def make_node(
     state_append=True,
     node_name="NODE",
     printout=True,
-    withtout_output_parser=False,
-    *,
-    skip_parser: bool | None = None,
+    skip_parser: bool = False,
 ) -> StateCallable:
 
-    effective_skip_parser = (
-        skip_parser if skip_parser is not None else withtout_output_parser
-    )
     parser = (
         PydanticOutputParser(pydantic_object=parser_output)
         if parser_output is not None
@@ -231,12 +227,15 @@ def make_node(
         llm,
         prompt_text,
         parser=parser,
-        skip_parser=effective_skip_parser,
+        skip_parser=skip_parser,
     )
 
     def node(state):
         logger.info(f"============= {node_name} ==============")
-        inputs = make_inputs(state, chain_resources.format_instructions)
+        inputs = make_inputs(state)
+        if chain_resources.returns_pydantic:
+            inputs["format_instructions"] = chain_resources.format_instructions
+
         result, headers = chain_resources.run(inputs)
         if chain_resources.returns_pydantic:
             result = result.model_dump()
@@ -252,3 +251,60 @@ def make_node(
         return state
 
     return node
+
+
+def make_planning_graph(state_schema, goal_node, thread_id="default"):
+    workflow = StateGraph(state_schema=state_schema)
+    # * ============================================================
+    workflow.add_node("goal_node", goal_node)
+
+    # * ============================================================
+    workflow.add_edge(START, "goal_node")
+    workflow.add_edge("goal_node", END)
+
+    # memory = MemorySaver()
+    # graph = workflow.compile(checkpointer=memory)
+    graph = workflow.compile(checkpointer=None)
+    config = {"configurable": {"thread_id": thread_id}}
+    return graph, config
+
+
+# def create_fact_checker_graph(
+#     fact_checker,
+#     fact_checker_regenerator,
+#     state_schema,
+#     thread_id: str = "default",
+#     save_graph_png: bool = False,
+# ):
+
+#     workflow = StateGraph(state_schema=state_schema)
+#     # * ============================================================
+#     workflow.add_node("fact_checker", fact_checker)
+#     workflow.add_node("fact_checker_regenerator", fact_checker_regenerator)
+#     workflow.add_node("web_search", tool_node)
+#     workflow.add_node("end_node", ai_answer_end_node)
+
+#     # * ============================================================
+#     workflow.add_edge(START, "fact_checker")
+#     workflow.add_conditional_edges(
+#         "fact_checker",
+#         fact_checker_router,
+#         {
+#             "continue": "web_search",
+#             "end": "fact_checker_regenerator",
+#         },
+#     )
+#     workflow.add_edge("web_search", "fact_checker")
+#     workflow.add_edge("fact_checker_regenerator", "end_node")
+#     workflow.add_edge("end_node", END)
+
+#     # memory = MemorySaver()
+#     # graph = workflow.compile(checkpointer=memory)
+#     graph = workflow.compile(checkpointer=None)
+
+#     if save_graph_png:
+#         drawer = PngDrawer()
+#         drawer.draw(graph.get_graph(), "./graph_fact_checker.png")
+#         logger.info("Saved graph_fact_checker.png")
+#     config = {"configurable": {"thread_id": thread_id}}
+#     return graph, config

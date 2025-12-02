@@ -8,8 +8,13 @@ from ..common.enums import ModelNames
 from ..common.errors import GraphInitializeError
 from ..common.logger import get_logger
 from ..config.config import Config
+from ..prompts.planning_prompt import (
+    GOAL_NODE_PROMPT,
+    TASK_NODE_PROMPT,
+    make_goal_node_inputs,
+)
 from . import graph as graph_module
-from .state import PlannerState, PlannerStateMaker
+from .state import PlannerState
 
 logger = get_logger(__name__)
 
@@ -91,4 +96,21 @@ class Runner:
 
 class PlanRunner(Runner):
     def build_graph(self):
-        pass
+        goal_node = graph_module.make_node(
+            llm=self._get_llm(
+                model_name=self.config.runner.goal_node.model_name,
+                prompt_cache_key="goal_node",
+            ),
+            prompt_text=GOAL_NODE_PROMPT,
+            make_inputs=make_goal_node_inputs,
+            parser_output=None,
+            state_key="subgoals",
+            state_append=True,
+            node_name="GOAL_NODE",
+        )
+
+        return graph_module.make_planning_graph(
+            state_schema=PlannerState,
+            goal_node=goal_node,
+            thread_id="planning",
+        )
