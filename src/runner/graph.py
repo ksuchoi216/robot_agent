@@ -16,7 +16,8 @@ from openai import APIStatusError, RateLimitError
 from ..common.enums import ModelNames
 from ..common.errors import LLMError, RateLimitExceededError
 from ..common.logger import get_logger
-from .state import PlannerState
+
+# from .state import StateSchema
 
 StateCallable = Callable[[Any], Any]
 RouterCallable = Callable[[Any], str]
@@ -309,7 +310,28 @@ def make_node(
     return node
 
 
-def make_planning_graph(state_schema, goal_node, task_node, thread_id="default"):
+# ! user_input node
+def make_user_input_node(
+    state_key="user_queries",
+    state_append=True,
+    node_name="USER_INPUT_NODE",
+):
+    def node(state):
+        logger.info(f"============= {node_name} ==============")
+        # Here you would implement the logic to get user input.
+        # For demonstration, we'll just log the existing user queries.
+        current_user_query = input("Please enter your query: ")
+        if state_append:
+            state[state_key].append(current_user_query)
+        else:
+            state[state_key] = current_user_query
+        logger.info(f"User Queries: {current_user_query}\n")
+        return state
+
+    return node
+
+
+def make_plan_graph(state_schema, goal_node, task_node, thread_id: str = "default"):
     workflow = StateGraph(state_schema=state_schema)
     # * ============================================================
     workflow.add_node("goal_node", goal_node)
@@ -319,6 +341,24 @@ def make_planning_graph(state_schema, goal_node, task_node, thread_id="default")
     workflow.add_edge(START, "goal_node")
     workflow.add_edge("goal_node", "task_node")
     workflow.add_edge("task_node", END)
+
+    # memory = MemorySaver()
+    # graph = workflow.compile(checkpointer=memory)
+    graph = workflow.compile(checkpointer=None)
+    config = {"configurable": {"thread_id": thread_id}}
+    return graph, config
+
+
+def make_supervised_plan_graph(
+    state_schema, nodes: Dict[str, Any], thread_id: str = "supervised_planning"
+):
+    workflow = StateGraph(state_schema=state_schema)
+    # * ============================================================
+    workflow.add_node("user_input_node", nodes["user_input_node"])
+
+    # * ============================================================
+    workflow.add_edge(START, "user_input_node")
+    workflow.add_edge("user_input_node", END)
 
     # memory = MemorySaver()
     # graph = workflow.compile(checkpointer=memory)
