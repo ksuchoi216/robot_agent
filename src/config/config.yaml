@@ -18,6 +18,9 @@ runner:
   task_decomp_node:
     model_name: gpt41mini
     prompt_cache_key: task_decomp_node
+  question_answer_node:
+    model_name: gpt41mini
+    prompt_cache_key: question_answer_node
 
 skills:
   - name: robot1
@@ -41,8 +44,6 @@ tasks:
   PlaceObject:
     description: "Place the specified object at the designated location."
     template: "PlaceObject <robot><object><receptacleObject>"
-
-
 
 
 # actions:

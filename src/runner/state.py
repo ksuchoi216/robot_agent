@@ -23,9 +23,7 @@ class StateSchema(TypedDict, total=False):
     feedback_result: Dict[str, Any]
     subgoals: List[str]
     tasks: List[Dict[str, Any]]
-
-    # actions: List[str]
-    # action_details: List[Dict[str, Any]]
+    question_answers: List[Dict[str, Any]]
 
 
 class StateMaker:
@@ -45,6 +43,7 @@ class StateMaker:
             "feedback_result": {},
             "subgoals": [],
             "tasks": [],
+            "question_answers": [],
         }
 
     def make_inputs(self):

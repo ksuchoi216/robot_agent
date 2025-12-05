@@ -361,6 +361,9 @@ def make_supervised_plan_graph(
     workflow.add_node("intent", nodes["intent"])
     workflow.add_node("supervisor", nodes["supervisor"])
     workflow.add_node("feedback", nodes["feedback"])
+    workflow.add_node("goal_decomp", nodes["goal_decomp"])
+    workflow.add_node("task_decomp", nodes["task_decomp"])
+    workflow.add_node("question_answer", nodes["question_answer"])
 
     # * ============================================================
     workflow.add_edge(START, "user_input")
@@ -372,17 +375,21 @@ def make_supervised_plan_graph(
             "end": END,
             "accept": END,
             "new": "supervisor",
+            "question": "question_answer",
         },
     )
     workflow.add_conditional_edges(
         "supervisor",
         routers["supervisor"],
         {
-            "feasible": END,
+            "feasible": "goal_decomp",
             "not_feasible": "feedback",
         },
     )
+    workflow.add_edge("question_answer", "user_input")
     workflow.add_edge("feedback", "user_input")
+    workflow.add_edge("goal_decomp", "task_decomp")
+    workflow.add_edge("task_decomp", END)
 
     # memory = MemorySaver()
     # graph = workflow.compile(checkpointer=memory)

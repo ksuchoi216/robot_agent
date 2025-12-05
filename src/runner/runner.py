@@ -182,6 +182,44 @@ class SupervisedPlanRunner(Runner):
             node_name="FEEDBACK_NODE",
         )
 
+        nodes["goal_decomp"] = graph_module.make_normal_node(
+            llm=self._get_llm(
+                model_name=self.config.runner.goal_decomp_node.model_name,
+                prompt_cache_key=self.config.runner.goal_decomp_node.prompt_cache_key,
+            ),
+            prompt_text=planning_prompt.GOAL_DECOMP_NODE_PROMPT,
+            make_inputs=planning_prompt.make_goal_decomp_node_inputs,
+            parser_output=planning_prompt.GoalDecompNodeParser,
+            state_key="subgoals",
+            state_append=False,
+            node_name="GOAL_DECOMP_NODE",
+        )
+        nodes["task_decomp"] = graph_module.make_normal_node(
+            llm=self._get_llm(
+                model_name=self.config.runner.task_decomp_node.model_name,
+                prompt_cache_key=self.config.runner.task_decomp_node.prompt_cache_key,
+            ),
+            prompt_text=planning_prompt.TASK_DECOMP_NODE_PROMPT,
+            make_inputs=planning_prompt.make_task_decomp_node_inputs,
+            parser_output=planning_prompt.TaskDecompNodeParser,
+            state_key="tasks",
+            state_append=False,
+            node_name="TASK_DECOMP_NODE",
+        )
+
+        nodes["question_answer"] = graph_module.make_normal_node(
+            llm=self._get_llm(
+                model_name=self.config.runner.question_answer_node.model_name,
+                prompt_cache_key=self.config.runner.question_answer_node.prompt_cache_key,
+            ),
+            prompt_text=process_prompt.QUESTION_ANSWER_NODE_PROMPT,
+            make_inputs=process_prompt.make_question_answer_node_inputs,
+            parser_output=process_prompt.QuestionAnswerParser,
+            state_key="question_answers",
+            state_append=True,
+            node_name="QUESTION_ANSWER_NODE",
+        )
+
         return graph_module.make_supervised_plan_graph(
             state_schema=StateSchema,
             nodes=nodes,

@@ -14,7 +14,7 @@ INTENT_NODE_PROMPT = """
 SYSTEM:
 You are the Intent Understander node in a robot-planning system.
 Given a single user input `query`, output ONE of: "stop", "accept", or "new".
-Return STRICT JSON ONLY with the shape: {{"intent":"stop|accept|new"}}.
+Return STRICT JSON ONLY with the shape: {{"intent":"stop|accept|new|question"}}.
 Do not include any extra fields, text, or punctuation.
 
 --- DECISION RULES ---
@@ -26,6 +26,12 @@ Do not include any extra fields, text, or punctuation.
 3) "new": any new or changed instruction/goal, or any message that is not clearly stop/accept.
    Examples: target/location/order/constraints 변경, 새로운 목표 제시, 질문/의견/요청 등.
    Defaults: ambiguous/unclear/neutral messages → "new".
+4) "question": user asks for information, clarification, or a factual answer.
+   Examples: 
+   - 위치 질문: "사과는 어딨어?", "냉장고 어디야?"
+   - 가능 여부 질문: "열 수 있어?", "가져올 수 있어?"
+   - 정보 요청: "스킬 뭐 있어?", "지금 상태가 어때?", "이거 어떻게 작동해?"
+   - 일반적인 의문문: sentences ending with "?", "~니?", "~어?" (except polite commands like "사과 좀 가져와줄래?")
 
 Priority for mixed signals: accept < stop < new
 (If acceptance appears together with modifications or new goal, choose "new". If acceptance appears with clear stop, choose "stop".)
@@ -39,6 +45,9 @@ Input: "knife 말고 가위로 해줘"   → {{"intent":"new"}}
 Input: "먼저 서랍 열고 봐"        → {{"intent":"new"}}
 Input: "성공률이 몇 퍼야?"        → {{"intent":"new"}}
 Input: "좋아, 근데 가위로 바꿔"   → {{"intent":"new"}}
+Input: "사과는 어딨어?"          → {{"intent":"question"}}
+Input: "아일랜드 식탁이 있어?" → {{"intent":"question"}}
+Input: "과일을 슬라이스 할 수 있어? → {{"intent":"question"}}
 
 --- INPUT ---
 query: {user_query}
@@ -49,9 +58,9 @@ query: {user_query}
 
 
 class IntentParser(BaseModel):
-    intent: Literal["stop", "accept", "new"] = Field(
+    intent: Literal["stop", "accept", "new", "question"] = Field(
         ...,
-        description='One of "stop", "accept", or "new" based on user intent analysis.',
+        description='One of "stop", "accept", "new", or "question" based on user intent analysis.',
     )
 
 
@@ -63,6 +72,8 @@ def route_intent(state):
         return "accept"
     elif intent == "new":
         return "new"
+    elif intent == "question":
+        return "question"
     else:
         raise ValueError(f"Unknown intent: {intent}")
 
@@ -91,45 +102,71 @@ SYSTEM:
 You are the SUPERVISOR node in a robot-planning system.
 
 Your jobs:
-1) Combine the list `user_queries` into ONE final unified query (`user_final_query`).
-2) Judge whether this unified query is feasible using the available objects, groups, and skills.
-3) Output STRICT JSON matching format_instructions. 
-j
+1) Combine the list `user_queries` into ONE final unified mission string (`user_final_query`).
+2) Decide whether this mission is feasible using objects, groups, and skills.
+3) Output STRICT JSON matching format_instructions. No extra text.
+
 ------------------------------------------------
 ## RULES FOR BUILDING user_final_query
 
 You MUST generate ONE natural-language Korean mission string.
 
+### STRICT NO-INFERENCE RULE (MANDATORY)
+You MUST NOT guess, infer, hallucinate, or fill in ANY missing information.
+This includes destinations, container names, object identities, skills, or locations.
+If the user does NOT explicitly specify a detail, you must NOT add it.
+The final `user_final_query` MUST contain ONLY information explicitly present in user_queries.
+
 ### 1) Merge partial intents
 Combine information from all user_queries:
-- Identify target object (latest override wins: e.g., “사과 말고 레몬” → 레몬)
-- Identify target location (latest specification wins)
-- Identify action (e.g., “옮겨줘”, “꺼내줘”, “가져와줘” → keep the latest)
-- When location is missing but needed → leave as-is (feasibility will handle)
+- Identify target object (latest override wins)
+- Identify target location ONLY if explicitly stated by the user
+- Identify action (latest override wins)
+- If destination is not specified by user: leave it missing
 
 ### 2) Handle overrides
-If a query modifies the previous one (e.g., “사과 말고 레몬”), use the updated content.
+If later queries modify earlier ones (e.g., "사과 말고 레몬"), use the updated content.
 
 ### 3) Output ONE mission string
-- Do NOT output multiple options.
-- Must be in natural Korean.
-- Examples:
-  - ["사과를 옮겨줘", "아일랜드 식탁에 옮겨줘", "사과말고 레몬"]
-    → "레몬을 아일랜드 식탁에 옮겨줘."
+Do not output alternatives.
+Use only what the user explicitly stated.
+only use user_queries content. don't infer or add new details.
+Example:
+["사과를 옮겨줘", "아일랜드 식탁에 옮겨줘", "사과말고 레몬"]
+→ "레몬을 아일랜드 식탁에 옮겨줘."
 
-### 4) This unified query is the ONLY query used for feasibility judgment.
+### 4) The final unified query is the ONLY content used for feasibility judgment.
 
 ------------------------------------------------
 ## RULES FOR is_feasible
-Return true only if:
-- Required object exists in object_text
-- Its group is reachable
-- Required skills exist
-- No contradictions with env_state
-- No unsafe failures in history_logs
 
-If false:
-- reasons: 1-2 short blockers
+`is_feasible` MUST be true ONLY if ALL of the following are satisfied:
+
+1) The required object exists in object_text.
+2) The required object's group is known and reachable.
+3) The required destination (if needed) is explicitly specified AND is in group_list_text.
+4) All required robot skills exist in skill_text.
+5) No contradictions with env_state.
+6) No unsafe failures in history_logs.
+
+If ANY of these conditions fail:
+- Set is_feasible = false
+- Provide 1–2 short blockers in `reasons`
+
+------------------------------------------------
+## HARD RULES FOR DESTINATION-REQUIRED ACTIONS
+
+Transport/move/take-out/place actions (e.g., "옮겨줘", "가져와줘", "놓아줘", "두어줘", "move", "bring", "place", "put")
+REQUIRE a destination.
+
+If the user did NOT explicitly specify a destination:
+- You MUST set is_feasible = false.
+- You MUST NOT propose, infer, or fabricate any destination.
+- A valid reason example: "목표 위치가 지정되지 않았습니다."
+
+Similarly, actions like "꺼내줘" (take out) REQUIRE a placement destination.
+If missing → is_feasible=false with a reason.
+
 ------------------------------
 ## INPUTS
 You receive:
@@ -269,4 +306,103 @@ class FeedbackParser(BaseModel):
     reason: List[str] = Field(
         ...,
         description="One or more short reasons explaining why the original query was not feasible (mirrors Supervisor reasons; you may add 1 extra if needed).",
+    )
+
+
+def make_question_answer_node_inputs(state):
+    inputs = state.get("inputs", {})
+    user_queries = state.get("user_queries", [])
+    return {
+        "recent_user_query": user_queries[-1] if user_queries else "",
+        "object_text": inputs.get("object_text", ""),
+        "group_list_text": inputs.get("group_list_text", ""),
+        "skill_text": inputs.get("skill_text", ""),
+    }
+
+
+QUESTION_ANSWER_NODE_PROMPT = """
+SYSTEM:
+You are the QUESTION node in a robot-planning system.
+
+You ONLY answer three types of robot-related questions:
+1) Object LOCATION questions (e.g., "사과 어디 있어?")
+2) Object EXISTENCE questions (e.g., "레몬 있어?")
+3) Capability / FEASIBILITY questions based on available skills (e.g., "문 열 수 있어?")
+
+Any question that does NOT belong to these three categories must return:
+{{"answer": "해당 질문은 로봇 작업과 관련된 허용된 질문이 아닙니다."}}
+
+You MUST output STRICT JSON ONLY in the form:
+{{"answer": "..."}}
+
+No explanation, no markdown, no commentary.
+
+
+------------------------------------------------------------
+QUESTION CLASSIFICATION RULES
+
+1) LOCATION QUESTIONS:
+   Trigger patterns:
+     - "어디", "어딨어", "어디야"
+     - questions ending with "?" indicating location
+   Behavior:
+     - If object exists in object_text: return its group
+     - If object does NOT exist: return that it does not exist
+
+2) EXISTENCE QUESTIONS:
+   Trigger patterns:
+     - "있어?", "존재해?", "있는지?"
+   Behavior:
+     - If object exists: say it exists
+     - Else: say it does not exist
+
+3) CAPABILITY QUESTIONS:
+   Trigger patterns:
+     - "할 수 있어?", "가능해?", "~할 수 있니?"
+     - Examples: "집을 수 있어?", "열 수 있어?", "옮길 수 있어?"
+   Behavior:
+     - Identify the required skill from the question
+     - If skill exists in skill_text: answer that it is possible
+     - If missing: answer that the robot cannot perform it
+    - Action-based capability questions (e.g., "사과를 자를 수 있어?", "빵을 썰 수 있어?"):
+    Map the action verb to a required skill and check if that skill exists in skill_text.
+------------------------------------------------------------
+INVALID QUESTION RULE:
+If the question does NOT match any of the above three categories:
+Return:
+{{"answer": "해당 질문은 로봇 작업과 관련된 허용된 질문이 아닙니다."}}
+
+Examples of INVALID questions:
+- "왜 실패했어?"
+- "어떻게 작동해?"
+- "로그 보여줘"
+- "너 누구야?"
+- "무슨 원리야?"
+
+------------------------------------------------------------
+INPUTS (for reasoning only; DO NOT echo them)
+
+## INPUTS
+You receive:
+- recent_user_query: the user's current mission instruction
+{recent_user_query}
+- object_text: list of objects and their group locations
+{object_text}
+- group_list_text: allowed reachable groups in the environment
+{group_list_text}
+- skill_text: robot skills available
+{skill_text}
+
+------------------------------------------------------------
+OUTPUT FORMAT (STRICT JSON)
+{format_instructions}
+"""
+
+
+class QuestionAnswerParser(BaseModel):
+    """Answer produced by the Question Answer node when user asks a question."""
+
+    answer: str = Field(
+        ...,
+        description="A concise and accurate answer to the user's question.",
     )

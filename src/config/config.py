@@ -28,7 +28,7 @@ class RunnerConfig(BaseModel):
     feedback_node: NodeConfig
     goal_decomp_node: NodeConfig
     task_decomp_node: NodeConfig
-    # action_node: NodeConfig
+    question_answer_node: NodeConfig
 
 
 class RobotSkillConfig(BaseModel):
@@ -42,7 +42,6 @@ class Config(BaseModel):
     runner: RunnerConfig
     skills: list[RobotSkillConfig]
     tasks: dict[str, dict[str, Any]]
-    # actions: dict[str, dict[str, Any]]
 
 
 def load_config(config_path: str | Path | None = None) -> Config:
