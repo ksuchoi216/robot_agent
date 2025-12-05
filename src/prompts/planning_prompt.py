@@ -1,6 +1,6 @@
 from typing import Callable, List
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 def make_goal_node_inputs(state):
@@ -42,7 +42,10 @@ Return ONLY the structured output that matches the JSON schema below.
 
 
 class GoalNodeParser(BaseModel):
-    subgoals: List[str]
+    subgoals: List[str] = Field(
+        ...,
+        description="A list of high-level subgoals decomposed from the user query.",
+    )
 
 
 def make_task_node_inputs(
@@ -165,17 +168,26 @@ Return ONLY the structured output that matches the JSON schema below.
 
 
 class SubTask(BaseModel):
-    skill: str
-    target: str
+    skill: str = Field(..., description="The robot skill to be used for this task.")
+    target: str = Field(
+        ...,
+        description="The target object or group for the skill to act upon.",
+    )
 
 
 class SubGoal(BaseModel):
     subgoal: str
-    tasks: List[SubTask]
+    tasks: List[SubTask] = Field(
+        ...,
+        description="An ordered list of semantic tasks to achieve the subgoal.",
+    )
 
 
 class TaskNodeParser(BaseModel):
-    tasks: List[SubGoal]
+    tasks: List[SubGoal] = Field(
+        ...,
+        description="A list of subgoals each decomposed into semantic tasks.",
+    )
 
 
 # 3. groups

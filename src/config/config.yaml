@@ -14,8 +14,8 @@ runner:
 skills:
   - name: robot1
     skills: ['GoToObject', 'OpenObject', "CloseObject", 'PickObject', "PlaceObject"]
-  - name: robot2
-    skills: ['GoToObject', 'OpenObject', "CloseObject", 'PickObject', "PlaceObject"]
+  # - name: robot2
+  #   skills: ['GoToObject', 'OpenObject', "CloseObject", 'PickObject', "PlaceObject"]
 
 tasks:
   GoToObject:

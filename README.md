@@ -46,9 +46,9 @@ Configuration files and loaders.
 - **`config.py`** - Configuration schema and loader using Pydantic
 - **`config.yaml`** - Main configuration file defining:
   - Output and prompt directories
-  - Model settings for each planning node
   - Robot skills (GoToObject, PickObject, PlaceObject, etc.)
   - Task and action templates
+  - Model settings for each planning node
 
 **Example Configuration:**
 ```yaml

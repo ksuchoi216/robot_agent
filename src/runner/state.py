@@ -8,7 +8,9 @@ from typing import Any, Dict, List
 from typing_extensions import TypedDict
 
 from ..config.config import Config
-from .text import make_object_text, make_skill_text
+from .text import make_group_list_text, make_object_text, make_skill_text
+
+# from robosuite.robosuite.environments.base import make
 
 
 class PlannerState(TypedDict, total=False):
@@ -37,15 +39,16 @@ class PlannerStateMaker:
             "inputs": {},
             "subgoals": [],
             "tasks": [],
-            # "actions": [],
-            # "action_details": [],
         }
 
     def make_inputs(self):
         inputs = {}
+        print("Making inputs for planner state...")
         object_text = make_object_text(self.url)
         inputs["object_text"] = object_text
         inputs["skill_text"] = make_skill_text(self.config.skills)
+        print(f"url: {self.url}")
+        inputs["group_list_text"] = make_group_list_text(self.url)
         return inputs
 
     def make(self, *, user_query: str) -> PlannerState:
