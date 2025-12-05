@@ -3,13 +3,21 @@ paths:
   prompt_dir: "src/graph/prompts/"
 
 runner:
-  goal_node:
+  intent_node:
     model_name: gpt41mini
-    prompt_cache_key: goal_node
-  task_node:
+    prompt_cache_key: intent_node
+  supervisor_node:
     model_name: gpt41mini
-    prompt_cache_key: task_node
-
+    prompt_cache_key: supervisor_node
+  feedback_node:
+    model_name: gpt41mini
+    prompt_cache_key: feedback_node
+  goal_decomp_node:
+    model_name: gpt41mini
+    prompt_cache_key: goal_decomp_node
+  task_decomp_node:
+    model_name: gpt41mini
+    prompt_cache_key: task_decomp_node
 
 skills:
   - name: robot1
@@ -33,6 +41,8 @@ tasks:
   PlaceObject:
     description: "Place the specified object at the designated location."
     template: "PlaceObject <robot><object><receptacleObject>"
+
+
 
 
 # actions:

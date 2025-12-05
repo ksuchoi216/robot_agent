@@ -18,6 +18,9 @@ class StateSchema(TypedDict, total=False):
 
     user_queries: List[str]
     inputs: Dict[str, Any]
+    intent_result: Dict[str, Any]
+    supervisor_result: Dict[str, Any]
+    feedback_result: Dict[str, Any]
     subgoals: List[str]
     tasks: List[Dict[str, Any]]
 
@@ -37,6 +40,9 @@ class StateMaker:
         self._base_state: StateSchema = {
             "user_queries": [],
             "inputs": {},
+            "intent_result": {},
+            "supervisor_result": {},
+            "feedback_result": {},
             "subgoals": [],
             "tasks": [],
         }

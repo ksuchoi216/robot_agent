@@ -23,8 +23,11 @@ class NodeConfig(BaseModel):
 class RunnerConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    goal_node: NodeConfig
-    task_node: NodeConfig
+    intent_node: NodeConfig
+    supervisor_node: NodeConfig
+    feedback_node: NodeConfig
+    goal_decomp_node: NodeConfig
+    task_decomp_node: NodeConfig
     # action_node: NodeConfig
 
 

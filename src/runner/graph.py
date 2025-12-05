@@ -262,7 +262,7 @@ def create_llm(
 
 
 # ! component
-def make_node(
+def make_normal_node(
     llm,
     *,
     prompt_text: str,
@@ -325,7 +325,7 @@ def make_user_input_node(
             state[state_key].append(current_user_query)
         else:
             state[state_key] = current_user_query
-        logger.info(f"User Queries: {current_user_query}\n")
+        logger.info(f"User Query: {current_user_query}\n")
         return state
 
     return node
@@ -350,15 +350,39 @@ def make_plan_graph(state_schema, goal_node, task_node, thread_id: str = "defaul
 
 
 def make_supervised_plan_graph(
-    state_schema, nodes: Dict[str, Any], thread_id: str = "supervised_planning"
+    state_schema,
+    nodes: Dict[str, Any],
+    routers: Dict[str, Any],
+    thread_id: str = "supervised_planning",
 ):
     workflow = StateGraph(state_schema=state_schema)
     # * ============================================================
-    workflow.add_node("user_input_node", nodes["user_input_node"])
+    workflow.add_node("user_input", nodes["user_input"])
+    workflow.add_node("intent", nodes["intent"])
+    workflow.add_node("supervisor", nodes["supervisor"])
+    workflow.add_node("feedback", nodes["feedback"])
 
     # * ============================================================
-    workflow.add_edge(START, "user_input_node")
-    workflow.add_edge("user_input_node", END)
+    workflow.add_edge(START, "user_input")
+    workflow.add_edge("user_input", "intent")
+    workflow.add_conditional_edges(
+        "intent",
+        routers["intent"],
+        {
+            "end": END,
+            "accept": END,
+            "new": "supervisor",
+        },
+    )
+    workflow.add_conditional_edges(
+        "supervisor",
+        routers["supervisor"],
+        {
+            "feasible": END,
+            "not_feasible": "feedback",
+        },
+    )
+    workflow.add_edge("feedback", "user_input")
 
     # memory = MemorySaver()
     # graph = workflow.compile(checkpointer=memory)

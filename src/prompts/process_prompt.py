@@ -4,12 +4,13 @@ from pydantic import BaseModel, Field
 
 
 def make_intent_node_inputs(state):
+    user_queries = state.get("user_queries", [])
     return {
-        "user_query": state["user_query"],
+        "user_query": user_queries[-1] if user_queries else "",
     }
 
 
-INTENT_UNDERSTANDER_PROMPT = """
+INTENT_NODE_PROMPT = """
 SYSTEM:
 You are the Intent Understander node in a robot-planning system.
 Given a single user input `query`, output ONE of: "stop", "accept", or "new".
@@ -54,25 +55,37 @@ class IntentParser(BaseModel):
     )
 
 
-def create_query_history_text(
-    query_list: List[str],
+def route_intent(state):
+    intent = state.get("intent_result", {}).get("intent")
+    if intent == "stop":
+        return "end"
+    elif intent == "accept":
+        return "accept"
+    elif intent == "new":
+        return "new"
+    else:
+        raise ValueError(f"Unknown intent: {intent}")
+
+
+def create_user_queries_text(
+    user_queries: List[str],
 ) -> str:
     """Create a numbered list text from a list of user queries."""
-    return "\n".join([f"{i+1}. {query}" for i, query in enumerate(query_list)])
+    return "\n".join([f"{i+1}. {query}" for i, query in enumerate(user_queries)])
 
 
 def make_supervisor_node_inputs(state):
     inputs = state.get("inputs", {})
-    user_query_history = state.get("user_query_history", [])
+    user_queries = state.get("user_queries", [])
     return {
-        "user_query_history_text": create_query_history_text(user_query_history),
+        "user_queries_text": create_user_queries_text(user_queries),
         "object_text": inputs.get("object_text", ""),
         "group_list_text": inputs.get("group_list_text", ""),
         "skill_text": inputs.get("skill_text", ""),
     }
 
 
-SUPERVISOR_PROMPT = """
+SUPERVISOR_NODE_PROMPT = """
 
 SYSTEM:
 You are the SUPERVISOR node in a robot-planning system.
@@ -121,7 +134,7 @@ If false:
 ## INPUTS
 You receive:
 - user_queries: the user's current mission instruction
-{user_query_history_text}
+{user_queries_text}
 - object_text: list of objects and their group locations
 {object_text}
 - group_list_text: allowed reachable groups in the environment
@@ -136,7 +149,7 @@ These are for reasoning only. Do NOT rewrite them.
 """
 
 
-class SupervisorOutput(BaseModel):
+class SupervisorParser(BaseModel):
     """Feasibility judgment + final unified query produced by the Supervisor."""
 
     is_feasible: bool = Field(
@@ -151,7 +164,7 @@ class SupervisorOutput(BaseModel):
         default_factory=list,
         description=(
             "Short blockers or confirmations. "
-            "If is_feasible=False, include 1–2 core blockers explaining why the original user intent cannot execute."
+            "If is_feasible=False, include 1-2 core blockers explaining why the original user intent cannot execute."
         ),
     )
 
@@ -165,18 +178,32 @@ class SupervisorOutput(BaseModel):
     )
 
 
+def route_supervisor(state):
+    is_feasible = state.get("supervisor_result", {}).get("is_feasible")
+    if is_feasible is True:
+        return "feasible"
+    elif is_feasible is False:
+        return "not_feasible"
+    else:
+        raise ValueError(f"Unknown is_feasible value: {is_feasible}")
+
+
 def make_feedback_node_inputs(state):
     inputs = state.get("inputs", {})
-    user_final_query = state.get("user_final_query", "")
+    supervisor_result = state.get("supervisor_result", {})
+    user_final_query = supervisor_result.get("user_final_query", "")
+    reasons = supervisor_result.get("reasons", [])
+    reason_text = "\n".join([f"- {reason}" for reason in reasons])
     return {
         "user_final_query": user_final_query,
         "object_text": inputs.get("object_text", ""),
         "group_list_text": inputs.get("group_list_text", ""),
         "skill_text": inputs.get("skill_text", ""),
+        "reason_text": reason_text,
     }
 
 
-FEEDBACK_PROMPT = """
+FEEDBACK_NODE_PROMPT = """
 SYSTEM:
 You are the FEEDBACK node in a robot-planning system.
 
@@ -191,7 +218,7 @@ RULES FOR reason
 
 RULES FOR suggestion
 - Produce ONE Korean mission string that is executable NOW.
-- Preserve the user’s original intent as much as possible.
+- Preserve the user's original intent as much as possible.
 - Repair using ONLY available resources:
   - Missing object → replace with a similar/available object.
   - Missing/unspecified location → choose a reachable group.
@@ -221,6 +248,8 @@ You receive:
 {group_list_text}
 - skill_text: robot skills available
 {skill_text}
+- reason_text: feasibility blockers from Supervisor
+{reason_text}
 
 These are for reasoning only. DO NOT repeat them.
 
@@ -230,7 +259,7 @@ These are for reasoning only. DO NOT repeat them.
 """
 
 
-class FeedbackOutput(BaseModel):
+class FeedbackParser(BaseModel):
     """Actionable fix produced by the Feedback node when a mission is not feasible."""
 
     suggestion: str = Field(

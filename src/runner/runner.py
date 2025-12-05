@@ -17,7 +17,7 @@ from ..config.config import Config
 #     make_goal_node_inputs,
 #     make_task_node_inputs,
 # )
-from ..prompts import planning_prompt
+from ..prompts import planning_prompt, process_prompt
 from . import graph as graph_module
 from .state import StateSchema
 
@@ -101,26 +101,26 @@ class Runner:
 
 class PlanRunner(Runner):
     def build_graph(self):
-        goal_node = graph_module.make_node(
+        goal_node = graph_module.make_normal_node(
             llm=self._get_llm(
-                model_name=self.config.runner.goal_node.model_name,
-                prompt_cache_key="goal_node",
+                model_name=self.config.runner.goal_decomp_node.model_name,
+                prompt_cache_key=self.config.runner.goal_decomp_node.prompt_cache_key,
             ),
-            prompt_text=planning_prompt.GOAL_NODE_PROMPT,
-            make_inputs=planning_prompt.make_goal_node_inputs,
-            parser_output=planning_prompt.GoalNodeParser,
+            prompt_text=planning_prompt.GOAL_DECOMP_NODE_PROMPT,
+            make_inputs=planning_prompt.make_goal_decomp_node_inputs,
+            parser_output=planning_prompt.GoalDecompNodeParser,
             state_key="subgoals",
             state_append=False,
             node_name="GOAL_NODE",
         )
-        task_node = graph_module.make_node(
+        task_node = graph_module.make_normal_node(
             llm=self._get_llm(
-                model_name=self.config.runner.task_node.model_name,
-                prompt_cache_key="task_node",
+                model_name=self.config.runner.task_decomp_node.model_name,
+                prompt_cache_key=self.config.runner.task_decomp_node.prompt_cache_key,
             ),
-            prompt_text=planning_prompt.TASK_NODE_PROMPT,
-            make_inputs=planning_prompt.make_task_node_inputs,
-            parser_output=planning_prompt.TaskNodeParser,
+            prompt_text=planning_prompt.TASK_DECOMP_NODE_PROMPT,
+            make_inputs=planning_prompt.make_task_decomp_node_inputs,
+            parser_output=planning_prompt.TaskDecompNodeParser,
             state_key="tasks",
             state_append=False,
             node_name="TASK_NODE",
@@ -137,11 +137,54 @@ class PlanRunner(Runner):
 class SupervisedPlanRunner(Runner):
     def build_graph(self):
         nodes = {}
-        nodes["user_input_node"] = graph_module.make_user_input_node(
+        routers = {}
+        nodes["user_input"] = graph_module.make_user_input_node(
             state_key="user_queries", state_append=True
         )
+        nodes["intent"] = graph_module.make_normal_node(
+            llm=self._get_llm(
+                model_name=self.config.runner.intent_node.model_name,
+                prompt_cache_key=self.config.runner.intent_node.prompt_cache_key,
+            ),
+            prompt_text=process_prompt.INTENT_NODE_PROMPT,
+            make_inputs=process_prompt.make_intent_node_inputs,
+            parser_output=process_prompt.IntentParser,
+            state_key="intent_result",
+            state_append=False,
+            node_name="INTENT_NODE",
+        )
+        routers["intent"] = process_prompt.route_intent
+
+        nodes["supervisor"] = graph_module.make_normal_node(
+            llm=self._get_llm(
+                model_name=self.config.runner.supervisor_node.model_name,
+                prompt_cache_key=self.config.runner.supervisor_node.prompt_cache_key,
+            ),
+            prompt_text=process_prompt.SUPERVISOR_NODE_PROMPT,
+            make_inputs=process_prompt.make_supervisor_node_inputs,
+            parser_output=process_prompt.SupervisorParser,
+            state_key="supervisor_result",
+            state_append=False,
+            node_name="SUPERVISOR_NODE",
+        )
+        routers["supervisor"] = process_prompt.route_supervisor
+
+        nodes["feedback"] = graph_module.make_normal_node(
+            llm=self._get_llm(
+                model_name=self.config.runner.feedback_node.model_name,
+                prompt_cache_key=self.config.runner.feedback_node.prompt_cache_key,
+            ),
+            prompt_text=process_prompt.FEEDBACK_NODE_PROMPT,
+            make_inputs=process_prompt.make_feedback_node_inputs,
+            parser_output=process_prompt.FeedbackParser,
+            state_key="feedback_result",
+            state_append=False,
+            node_name="FEEDBACK_NODE",
+        )
+
         return graph_module.make_supervised_plan_graph(
             state_schema=StateSchema,
             nodes=nodes,
+            routers=routers,
             thread_id="supervised_planning",
         )
