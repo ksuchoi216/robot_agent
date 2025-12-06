@@ -13,19 +13,21 @@ from .text import make_group_list_text, make_object_text, make_skill_text
 # from robosuite.robosuite.environments.base import make
 
 
-class PlannerState(TypedDict, total=False):
+class StateSchema(TypedDict, total=False):
     """State contract for the planner LangGraph workflow."""
 
-    user_query: str
+    user_queries: List[str]
     inputs: Dict[str, Any]
+    intent_result: Dict[str, Any]
+    supervisor_result: Dict[str, Any]
+    feedback_result: Dict[str, Any]
+    feedback_loop_count: int
     subgoals: List[str]
     tasks: List[Dict[str, Any]]
-
-    # actions: List[str]
-    # action_details: List[Dict[str, Any]]
+    question_answers: List[Dict[str, Any]]
 
 
-class PlannerStateMaker:
+class StateMaker:
     """Factory for creating planner state inputs."""
 
     def __init__(self, config: Config, url: None | str = None) -> None:
@@ -34,16 +36,21 @@ class PlannerStateMaker:
             self.url = url
         else:
             self.url = "http://127.0.0.1:8800"
-        self._base_state: PlannerState = {
-            "user_query": "",
+        self._base_state: StateSchema = {
+            "user_queries": [],
             "inputs": {},
+            "intent_result": {},
+            "supervisor_result": {},
+            "feedback_result": {},
+            "feedback_loop_count": 0,
             "subgoals": [],
             "tasks": [],
+            "question_answers": [],
         }
 
     def make_inputs(self):
         inputs = {}
-        print("Making inputs for planner state...")
+        print("Making inputs for state...")
         object_text = make_object_text(self.url)
         inputs["object_text"] = object_text
         inputs["skill_text"] = make_skill_text(self.config.skills)
@@ -51,12 +58,12 @@ class PlannerStateMaker:
         inputs["group_list_text"] = make_group_list_text(self.url)
         return inputs
 
-    def make(self, *, user_query: str) -> PlannerState:
-        """Create a fresh planner state with defaults."""
-        state: PlannerState = copy.deepcopy(self._base_state)
-        state["user_query"] = user_query
+    def make(self, *, user_query: str) -> StateSchema:
+        """Create a fresh state with defaults."""
+        state: StateSchema = copy.deepcopy(self._base_state)
+        state["user_queries"] = [user_query]
         state["inputs"] = self.make_inputs()
         return state
 
 
-__all__ = ["PlannerState", "PlannerStateMaker"]
+__all__ = ["StateSchema", "StateMaker"]

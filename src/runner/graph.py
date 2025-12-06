@@ -16,7 +16,8 @@ from openai import APIStatusError, RateLimitError
 from ..common.enums import ModelNames
 from ..common.errors import LLMError, RateLimitExceededError
 from ..common.logger import get_logger
-from .state import PlannerState
+
+# from .state import StateSchema
 
 StateCallable = Callable[[Any], Any]
 RouterCallable = Callable[[Any], str]
@@ -261,7 +262,7 @@ def create_llm(
 
 
 # ! component
-def make_node(
+def make_normal_node(
     llm,
     *,
     prompt_text: str,
@@ -270,6 +271,8 @@ def make_node(
     state_key="history",
     state_append=True,
     node_name="NODE",
+    make_outputs: Callable | None = None,
+    modify_state: Callable | None = None,
     printout=True,
     skip_parser: bool = False,
 ) -> StateCallable:
@@ -292,9 +295,15 @@ def make_node(
         if chain_resources.returns_pydantic:
             inputs["format_instructions"] = chain_resources.format_instructions
 
-        result, headers = chain_resources.run(inputs)
+        result, _ = chain_resources.run(inputs)
+        if make_outputs is not None:
+            result = make_outputs(result)
+
         if chain_resources.returns_pydantic:
             result = result.model_dump()
+
+        if modify_state is not None:
+            state = modify_state(state, result)
 
         if state_append:
             state[state_key].append(result)
@@ -309,16 +318,93 @@ def make_node(
     return node
 
 
-def make_planning_graph(state_schema, goal_node, task_node, thread_id="default"):
+# ! user_input node
+def make_user_input_node(
+    state_key="user_queries",
+    state_append=True,
+    node_name="USER_INPUT_NODE",
+):
+    def node(state):
+        logger.info(f"============= {node_name} ==============")
+        # Here you would implement the logic to get user input.
+        # For demonstration, we'll just log the existing user queries.
+        current_user_query = input("Please enter your query: ")
+        if state_append:
+            state[state_key].append(current_user_query)
+        else:
+            state[state_key] = current_user_query
+        logger.info(f"User Query: {current_user_query}\n")
+        return state
+
+    return node
+
+
+# ! rag node
+def make_rag_node(
+    retriever,
+    state_key="rag_text",
+    state_append=False,
+    node_name="RAG_NODE",
+):
+    def node(state):
+        logger.info(f"============= {node_name} ==============")
+        # Here you would implement the logic to retrieve documents.
+        # For demonstration, we'll just log a placeholder.
+        query = state.get("user_queries", [])[-1] if state.get("user_queries") else ""
+        documents = retriever.invoke(query)
+        rag_texts = [doc.page_content for doc in documents]
+        if state_append:
+            state[state_key].extend(rag_texts)
+        else:
+            state[state_key] = rag_texts
+        logger.info(f"RAG Texts Retrieved: {rag_texts}\n")
+        return state
+
+    return node
+
+
+def make_supervised_plan_graph(
+    state_schema,
+    nodes: Dict[str, Any],
+    routers: Dict[str, Any],
+    thread_id: str = "supervised_planning",
+):
     workflow = StateGraph(state_schema=state_schema)
     # * ============================================================
-    workflow.add_node("goal_node", goal_node)
-    workflow.add_node("task_node", task_node)
+    workflow.add_node("user_input", nodes["user_input"])
+    workflow.add_node("intent", nodes["intent"])
+    workflow.add_node("supervisor", nodes["supervisor"])
+    workflow.add_node("feedback", nodes["feedback"])
+    workflow.add_node("goal_decomp", nodes["goal_decomp"])
+    workflow.add_node("task_decomp", nodes["task_decomp"])
+    workflow.add_node("question_answer", nodes["question_answer"])
 
     # * ============================================================
-    workflow.add_edge(START, "goal_node")
-    workflow.add_edge("goal_node", "task_node")
-    workflow.add_edge("task_node", END)
+    workflow.add_edge(START, "user_input")
+    workflow.add_edge("user_input", "intent")
+    workflow.add_conditional_edges(
+        "intent",
+        routers["intent"],
+        {
+            "end": END,
+            "accept": "supervisor",
+            "accept_no_feedback": "feedback",
+            "new": "supervisor",
+            "question": "question_answer",
+        },
+    )
+    workflow.add_conditional_edges(
+        "supervisor",
+        routers["supervisor"],
+        {
+            "feasible": "goal_decomp",
+            "not_feasible": "feedback",
+        },
+    )
+    workflow.add_edge("question_answer", "user_input")
+    workflow.add_edge("feedback", "user_input")
+    workflow.add_edge("goal_decomp", "task_decomp")
+    workflow.add_edge("task_decomp", END)
 
     # memory = MemorySaver()
     # graph = workflow.compile(checkpointer=memory)

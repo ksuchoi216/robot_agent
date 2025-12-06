@@ -23,9 +23,12 @@ class NodeConfig(BaseModel):
 class RunnerConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    goal_node: NodeConfig
-    task_node: NodeConfig
-    # action_node: NodeConfig
+    intent_node: NodeConfig
+    supervisor_node: NodeConfig
+    feedback_node: NodeConfig
+    goal_decomp_node: NodeConfig
+    task_decomp_node: NodeConfig
+    question_answer_node: NodeConfig
 
 
 class RobotSkillConfig(BaseModel):
@@ -39,7 +42,6 @@ class Config(BaseModel):
     runner: RunnerConfig
     skills: list[RobotSkillConfig]
     tasks: dict[str, dict[str, Any]]
-    # actions: dict[str, dict[str, Any]]
 
 
 def load_config(config_path: str | Path | None = None) -> Config:
