@@ -21,6 +21,7 @@ class StateSchema(TypedDict, total=False):
     intent_result: Dict[str, Any]
     supervisor_result: Dict[str, Any]
     feedback_result: Dict[str, Any]
+    feedback_loop_count: int
     subgoals: List[str]
     tasks: List[Dict[str, Any]]
     question_answers: List[Dict[str, Any]]
@@ -41,6 +42,7 @@ class StateMaker:
             "intent_result": {},
             "supervisor_result": {},
             "feedback_result": {},
+            "feedback_loop_count": 0,
             "subgoals": [],
             "tasks": [],
             "question_answers": [],

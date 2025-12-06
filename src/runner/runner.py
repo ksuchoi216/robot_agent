@@ -99,41 +99,6 @@ class Runner:
         return final_states
 
 
-class PlanRunner(Runner):
-    def build_graph(self):
-        goal_node = graph_module.make_normal_node(
-            llm=self._get_llm(
-                model_name=self.config.runner.goal_decomp_node.model_name,
-                prompt_cache_key=self.config.runner.goal_decomp_node.prompt_cache_key,
-            ),
-            prompt_text=planning_prompt.GOAL_DECOMP_NODE_PROMPT,
-            make_inputs=planning_prompt.make_goal_decomp_node_inputs,
-            parser_output=planning_prompt.GoalDecompNodeParser,
-            state_key="subgoals",
-            state_append=False,
-            node_name="GOAL_NODE",
-        )
-        task_node = graph_module.make_normal_node(
-            llm=self._get_llm(
-                model_name=self.config.runner.task_decomp_node.model_name,
-                prompt_cache_key=self.config.runner.task_decomp_node.prompt_cache_key,
-            ),
-            prompt_text=planning_prompt.TASK_DECOMP_NODE_PROMPT,
-            make_inputs=planning_prompt.make_task_decomp_node_inputs,
-            parser_output=planning_prompt.TaskDecompNodeParser,
-            state_key="tasks",
-            state_append=False,
-            node_name="TASK_NODE",
-        )
-
-        return graph_module.make_plan_graph(
-            state_schema=StateSchema,
-            goal_node=goal_node,
-            task_node=task_node,
-            thread_id="planning",
-        )
-
-
 class SupervisedPlanRunner(Runner):
     def build_graph(self):
         nodes = {}
@@ -166,6 +131,7 @@ class SupervisedPlanRunner(Runner):
             state_key="supervisor_result",
             state_append=False,
             node_name="SUPERVISOR_NODE",
+            modify_state=process_prompt.modify_supervisor_state,
         )
         routers["supervisor"] = process_prompt.route_supervisor
 

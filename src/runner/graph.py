@@ -271,6 +271,8 @@ def make_normal_node(
     state_key="history",
     state_append=True,
     node_name="NODE",
+    make_outputs: Callable | None = None,
+    modify_state: Callable | None = None,
     printout=True,
     skip_parser: bool = False,
 ) -> StateCallable:
@@ -293,9 +295,15 @@ def make_normal_node(
         if chain_resources.returns_pydantic:
             inputs["format_instructions"] = chain_resources.format_instructions
 
-        result, headers = chain_resources.run(inputs)
+        result, _ = chain_resources.run(inputs)
+        if make_outputs is not None:
+            result = make_outputs(result)
+
         if chain_resources.returns_pydantic:
             result = result.model_dump()
+
+        if modify_state is not None:
+            state = modify_state(state, result)
 
         if state_append:
             state[state_key].append(result)
@@ -331,22 +339,28 @@ def make_user_input_node(
     return node
 
 
-def make_plan_graph(state_schema, goal_node, task_node, thread_id: str = "default"):
-    workflow = StateGraph(state_schema=state_schema)
-    # * ============================================================
-    workflow.add_node("goal_node", goal_node)
-    workflow.add_node("task_node", task_node)
+# ! rag node
+def make_rag_node(
+    retriever,
+    state_key="rag_text",
+    state_append=False,
+    node_name="RAG_NODE",
+):
+    def node(state):
+        logger.info(f"============= {node_name} ==============")
+        # Here you would implement the logic to retrieve documents.
+        # For demonstration, we'll just log a placeholder.
+        query = state.get("user_queries", [])[-1] if state.get("user_queries") else ""
+        documents = retriever.invoke(query)
+        rag_texts = [doc.page_content for doc in documents]
+        if state_append:
+            state[state_key].extend(rag_texts)
+        else:
+            state[state_key] = rag_texts
+        logger.info(f"RAG Texts Retrieved: {rag_texts}\n")
+        return state
 
-    # * ============================================================
-    workflow.add_edge(START, "goal_node")
-    workflow.add_edge("goal_node", "task_node")
-    workflow.add_edge("task_node", END)
-
-    # memory = MemorySaver()
-    # graph = workflow.compile(checkpointer=memory)
-    graph = workflow.compile(checkpointer=None)
-    config = {"configurable": {"thread_id": thread_id}}
-    return graph, config
+    return node
 
 
 def make_supervised_plan_graph(
@@ -373,7 +387,8 @@ def make_supervised_plan_graph(
         routers["intent"],
         {
             "end": END,
-            "accept": END,
+            "accept": "supervisor",
+            "accept_no_feedback": "feedback",
             "new": "supervisor",
             "question": "question_answer",
         },

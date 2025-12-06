@@ -66,10 +66,15 @@ class IntentParser(BaseModel):
 
 def route_intent(state):
     intent = state.get("intent_result", {}).get("intent")
+    feedback_loop_count = state.get("feedback_loop_count", 0)
+
     if intent == "stop":
         return "end"
     elif intent == "accept":
-        return "accept"
+        if feedback_loop_count > 0:
+            return "accept"
+        else:
+            return "accept_no_feedback"
     elif intent == "new":
         return "new"
     elif intent == "question":
@@ -151,7 +156,7 @@ Example:
 
 If ANY of these conditions fail:
 - Set is_feasible = false
-- Provide 1–2 short blockers in `reasons`
+- Provide 1-2 short blockers in `reasons`
 
 ------------------------------------------------
 ## HARD RULES FOR DESTINATION-REQUIRED ACTIONS
@@ -213,6 +218,13 @@ class SupervisorParser(BaseModel):
             "and produce ONE complete Korean mission string representing the user's most recent intent."
         ),
     )
+
+
+def modify_supervisor_state(state, result):
+    is_feasible = state.get("supervisor_result", {}).get("is_feasible")
+    if is_feasible is False:
+        state["feedback_loop_count"] = state.get("feedback_loop_count", 0) + 1
+    return state
 
 
 def route_supervisor(state):
