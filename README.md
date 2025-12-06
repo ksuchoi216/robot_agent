@@ -1,239 +1,373 @@
-<<<<<<< Updated upstream
-# robot-agent
-<<<<<<< HEAD
-=======
+# Robot Agent - Supervised Hierarchical Planning System
 
-## reference
-git@github.com:marc1198/chat-hsr.git
->>>>>>> release/0.0.1
-=======
-# Robot Agent Source Code
+A LangGraph-based robot planning agent that decomposes natural language commands into executable robot tasks through a supervised, multi-stage planning pipeline with interactive feedback loops.
 
-This directory contains the core source code for the robot planning agent. The system uses a hierarchical planning approach to break down complex robot tasks into executable actions.
+## 📋 Overview
 
-## Overview
+The robot agent uses a **supervised planning approach** that combines:
+- **Intent Classification** - Determines request type (new task, modification, question, end)
+- **Feasibility Checking** - Validates whether requests can be executed
+- **Interactive Feedback** - Provides explanations when requests cannot be fulfilled
+- **Question Answering** - Handles user queries about environment or capabilities
+- **Hierarchical Decomposition** - Breaks down feasible tasks into goals and executable tasks
 
-The robot agent decomposes user commands through three levels:
-1. **Goal Level** - Breaks user input into high-level subgoals
-2. **Task Level** - Converts subgoals into semantic task steps
-3. **Action Level** - Translates tasks into executable robot actions
+## 🏗️ System Architecture
 
-## Directory Structure
+### Graph Structure
+
+![Planning Graph](graph.png)
+
+The system implements a **StateGraph** with the following nodes and conditional routing:
 
 ```
-src/
-├── common/          # Shared utilities and definitions
-├── config/          # Configuration management
-├── prompts/         # LLM prompt templates
-├── rag/             # Retrieval-augmented generation (placeholder)
-├── runner/          # Main execution pipeline
-├── tools/           # External tools integration (placeholder)
-└── utils/           # Helper functions
+START → user_input → intent → [Router: intent]
+                                   ├─→ end (END)
+                                   ├─→ accept → supervisor → [Router: supervisor]
+                                   ├─→ accept_no_feedback → feedback → user_input
+                                   ├─→ new → supervisor                            │
+                                   └─→ question → question_answer → user_input    │
+                                                                                   │
+supervisor router: ──────────────────────────────────────────────────────────────┘
+    ├─→ feasible → goal_decomp → task_decomp → END
+    └─→ not_feasible → feedback → user_input
 ```
 
-## Components
+### Node Descriptions
 
-### 📁 common/
-Core shared components used throughout the application.
+| Node | Purpose | Output |
+|------|---------|--------|
+| **user_input** | Captures user query interactively | Adds query to state |
+| **intent** | Classifies user's intention | `{intent, reason, needs_feedback}` |
+| **supervisor** | Validates feasibility with robot capabilities | `{feasible, reason}` |
+| **feedback** | Generates explanation for infeasible/unclear requests | `{feedback_message}` |
+| **question_answer** | Answers environment/capability questions | `{question, answer}` |
+| **goal_decomp** | Decomposes command into high-level subgoals | `{subgoals: [str]}` |
+| **task_decomp** | Converts subgoals into executable task sequences | `{tasks: [dict]}` |
 
-- **`enums.py`** - Model name definitions (GPT-4, GPT-5 variants)
-- **`errors.py`** - Custom exception classes with structured error handling
-- **`logger.py`** - Centralized logging with file rotation support
+### Routing Logic
 
-### 📁 config/
-Configuration files and loaders.
+#### Intent Router
+Routes based on classified user intention:
+- `"end"` → Terminate conversation (END)
+- `"accept"` → Accept modified request → supervisor
+- `"accept_no_feedback"` → Accept with feedback → feedback
+- `"new"` → New task request → supervisor
+- `"question"` → User question → question_answer
 
-- **`config.py`** - Configuration schema and loader using Pydantic
-- **`config.yaml`** - Main configuration file defining:
-  - Output and prompt directories
-  - Robot skills (GoToObject, PickObject, PlaceObject, etc.)
-  - Task and action templates
-  - Model settings for each planning node
+#### Supervisor Router
+Routes based on feasibility check:
+- `"feasible"` → Proceed to planning → goal_decomp
+- `"not_feasible"` → Provide feedback → feedback
 
-**Example Configuration:**
+## 📁 Project Structure
+
+```
+robot_agent/
+├── main.py                    # Entry point for CLI execution
+├── graph.png                  # System architecture diagram
+├── environment.yml            # Conda environment specification
+├── src/
+│   ├── common/
+│   │   ├── enums.py          # Model name enumerations (GPT-4, GPT-5 variants)
+│   │   ├── errors.py         # Custom exception hierarchy
+│   │   └── logger.py         # Centralized logging with rotation
+│   ├── config/
+│   │   ├── config.py         # Pydantic configuration loader
+│   │   └── config.yaml       # Node settings, skills, task templates
+│   ├── prompts/
+│   │   ├── planning_prompt.py    # Goal/task decomposition prompts
+│   │   └── process_prompt.py     # Intent/supervisor/feedback prompts
+│   ├── runner/
+│   │   ├── state.py          # StateSchema and StateMaker
+│   │   ├── graph.py          # LLM chain builders and graph constructor
+│   │   ├── runner.py         # SupervisedPlanRunner orchestration
+│   │   └── text.py           # Formatters for objects/skills/groups
+│   ├── utils/
+│   │   └── file.py           # File I/O utilities (json, yaml, pkl, csv)
+│   ├── rag/                  # (Placeholder for retrieval)
+│   └── tools/                # (Placeholder for external tools)
+├── data/                      # Runtime data storage
+└── test_planning.ipynb        # Interactive testing notebook
+```
+
+## 🔄 Data Flow
+
+### State Schema
+```python
+StateSchema = {
+    "user_queries": List[str],              # User input history
+    "inputs": Dict[str, Any],               # Environment context (objects, skills, groups)
+    "intent_result": Dict[str, Any],        # Intent classification output
+    "supervisor_result": Dict[str, Any],    # Feasibility check output
+    "feedback_result": Dict[str, Any],      # Generated feedback message
+    "feedback_loop_count": int,             # Number of feedback iterations
+    "subgoals": List[str],                  # High-level goal decomposition
+    "tasks": List[Dict[str, Any]],          # Executable task sequences
+    "question_answers": List[Dict[str, Any]] # Q&A history
+}
+```
+
+### Execution Flow Example
+
+**User Input:** *"Bring the apple to the table"*
+
+1. **user_input** → Captures: `"Bring the apple to the table"`
+2. **intent** → Classifies: `{intent: "new", reason: "User wants robot to perform new task", needs_feedback: false}`
+3. **supervisor** → Validates: `{feasible: true, reason: "Robot has GoToObject, PickObject, PlaceObject skills"}`
+4. **goal_decomp** → Decomposes: `{subgoals: ["Bring the apple to the table"]}`
+5. **task_decomp** → Plans:
+   ```json
+   {
+     "tasks": [
+       {"skill": "GoToObject", "target": "apple"},
+       {"skill": "PickObject", "target": "apple"},
+       {"skill": "GoToObject", "target": "table"},
+       {"skill": "PlaceObject", "target": "table", "object": "apple"}
+     ]
+   }
+   ```
+
+## 🚀 Quick Start
+
+### Installation
+
+```bash
+# Create conda environment
+conda env create -f environment.yml
+conda activate robot_agent
+
+# Or use pip
+pip install -r requirements.txt
+```
+
+### Configuration
+
+Edit `src/config/config.yaml`:
+
 ```yaml
 runner:
-  goal_node:
+  intent_node:
+    model_name: gpt41mini           # OpenAI model for intent classification
+    prompt_cache_key: intent_node   # Cache key for prompt optimization
+  supervisor_node:
     model_name: gpt41mini
-  task_node:
-    model_name: gpt41mini
-  action_node:
-    model_name: gpt41mini
+    prompt_cache_key: supervisor_node
+  # ... (other nodes)
 
 skills:
   - name: robot1
-    skills: ['GoToObject', 'PickObject', 'PlaceObject']
+    skills: ['GoToObject', 'OpenObject', 'CloseObject', 'PickObject', 'PlaceObject']
+
+tasks:
+  GoToObject:
+    description: "Move to the specified object."
+    template: "GoToObject <robot><object>"
+  # ... (other task templates)
 ```
 
-### 📁 prompts/
-LLM prompt templates for the planning pipeline.
+### Usage
 
-- **`planning_prompt.py`** - Contains three main prompts:
-  - `GOAL_NODE_PROMPT` - Decomposes user commands into subgoals
-  - `TASK_NODE_PROMPT` - Breaks subgoals into task steps
-  - Includes few-shot examples for better AI understanding
-
-**Example Flow:**
-```
-User: "Bring the apple to the table"
-↓
-Goal: ["Bring the apple to the table"]
-↓
-Tasks: ["Open the fridge", "Pick up the apple", "Move to table", "Place apple"]
-↓
-Actions: [MoveAhead, PickObject, MoveAhead, PlaceObject, Done]
-```
-
-### 📁 runner/
-The main execution engine that orchestrates the planning workflow.
-
-- **`state.py`** - Defines the planning state structure
-  - `PlannerState` - TypedDict containing user_query, subgoals, tasks
-  - `PlannerStateMaker` - Factory for creating initial states
-
-- **`graph.py`** - LangGraph-based pipeline implementation
-  - Creates LLM chains with prompts and parsers
-  - Manages model initialization and caching
-  - Handles token usage tracking and rate limits
-
-- **`runner.py`** - Main runner class
-  - `Runner` - Base class with graph building logic
-  - `PlanRunner` - Specialized runner for planning tasks
-  - Manages LLM instances and execution
-
-- **`text.py`** - Text formatting utilities
-  - `make_object_text()` - Fetches and formats environment objects
-  - `make_skill_text()` - Formats robot skills for prompts
-
-### 📁 utils/
-General-purpose utility functions.
-
-- **`file.py`** - File I/O operations
-  - `load()` - Load files (txt, json, yaml, csv, pkl)
-  - `save()` - Save data to files with automatic directory creation
-  - Supports multiple formats with error handling
-
-### 📁 rag/
-Placeholder for retrieval-augmented generation features.
-
-### 📁 tools/
-Placeholder for external tool integrations.
-
-## How It Works
-
-### 1. Initialize Configuration
 ```python
 from src.config.config import load_config
+from src.runner.state import StateMaker
+from src.runner.runner import SupervisedPlanRunner
 
-config = load_config()  # Loads config.yaml
-```
+# Load configuration
+config = load_config()
 
-### 2. Create Initial State
-```python
-from src.runner.state import PlannerStateMaker
+# Create state factory
+state_maker = StateMaker(config, url="http://127.0.0.1:8800")
 
-state_maker = PlannerStateMaker(config, url="http://127.0.0.1:8800")
+# Initialize runner
+runner = SupervisedPlanRunner(config)
+
+# Run planning pipeline
 initial_state = state_maker.make(user_query="Bring me a cup")
-```
-
-### 3. Run the Pipeline
-```python
-from src.runner.runner import PlanRunner
-
-runner = PlanRunner(config)
 final_state = runner.invoke(initial_state)
+
+# Access results
+print(final_state["subgoals"])
+print(final_state["tasks"])
 ```
 
-### 4. Access Results
+### CLI Execution
+
+```bash
+python main.py "Bring the apple to the table"
+```
+
+## 🛠️ Key Components
+
+### LLM Chain Architecture
+
+Each node is built using `make_normal_node()`:
+
 ```python
-print(final_state["subgoals"])  # High-level goals
-print(final_state["tasks"])     # Task decomposition
+make_normal_node(
+    llm=create_llm(model_name, temperature, prompt_cache_key),
+    prompt_text=PROMPT_TEMPLATE,
+    make_inputs=input_formatter_function,
+    parser_output=PydanticOutputModel,
+    state_key="result_field",
+    state_append=False,
+    node_name="NODE_NAME"
+)
 ```
 
-## Key Features
-
-### ✅ Hierarchical Planning
-Three-level decomposition ensures clear separation of concerns and easier debugging.
-
-### ✅ Flexible Configuration
-YAML-based configuration allows easy switching between models and modifying robot skills.
-
-### ✅ Structured Error Handling
-Custom exceptions with error codes, status codes, and detailed context for better debugging.
-
-### ✅ Logging System
-Rotating file logs organized by module with configurable verbosity.
-
-### ✅ LLM Integration
-Built on LangChain and LangGraph with support for:
-- Multiple OpenAI models (GPT-4, GPT-5)
-- Prompt caching for efficiency
+**Features:**
+- Automatic Pydantic output parsing
+- Format instruction injection
 - Token usage tracking
-- Rate limit monitoring
+- Rate limit handling with exponential backoff
+- Model name resolution and tagging
 
-### ✅ Type Safety
-Uses Pydantic for configuration validation and TypedDict for state management.
+### Error Handling
 
-## Data Flow
+Custom error hierarchy with structured context:
 
-```
-User Query
-    ↓
-[PlannerStateMaker] → Creates initial state with environment info
-    ↓
-[Goal Node] → Decomposes into subgoals
-    ↓
-[Task Node] → Converts each subgoal into tasks
-    ↓
-[Action Node] → Translates tasks into robot actions
-    ↓
-Final State (subgoals, tasks, actions)
+```python
+class BaseServiceError(Exception):
+    error_code: str
+    status_code: int
+    domain: str
+    details: Dict[str, Any]
 ```
 
-## Environment Integration
-
-The system connects to a robot simulation server to fetch:
-- Object locations and groupings
-- Available robot skills
-- Environment state
-
-This information is formatted into text prompts for the LLM to understand the current context.
-
-## Error Handling
-
-All custom errors inherit from `BaseServiceError` and include:
-- **Error Code** - Machine-readable identifier
-- **Status Code** - HTTP-style status (400, 500, etc.)
-- **Domain** - Component where error occurred
-- **Details** - Additional context as dictionary
-
-Common errors:
+**Error Types:**
 - `ConfigError` - Invalid configuration
-- `ParsingError` - Failed to parse LLM output
-- `LLMError` - LLM API failures
-- `GraphExecutionError` - Pipeline execution failures
+- `LLMError` - API call failures
+- `RateLimitExceededError` - Rate limit violations
+- `GraphExecutionError` - Pipeline failures
+- `ParsingError` - Output parsing issues
 
-## Best Practices
+### Logging
 
-1. **Always load config first** - Ensures all settings are available
-2. **Use the logger** - All modules should call `get_logger(__name__)`
-3. **Handle errors gracefully** - Catch specific exceptions and log context
-4. **Validate state** - Use Pydantic models for type safety
-5. **Cache LLM instances** - Runner maintains a cache to avoid recreating models
+Automatic file rotation with module-level loggers:
 
-## Dependencies
+```python
+from src.common.logger import get_logger
 
-- **LangChain** - LLM orchestration framework
-- **LangGraph** - Graph-based workflow management
-- **Pydantic** - Data validation and settings
-- **PyYAML** - Configuration file parsing
-- **OpenAI** - LLM API access
+logger = get_logger(__name__, is_save=True)
+logger.info("Processing started")
+logger.error("Failed to parse output", exc_info=True)
+```
 
-## Future Enhancements
+## 🔧 Advanced Features
 
-- Complete RAG implementation for knowledge retrieval
-- Add more robot skills and actions
-- Implement action-level planning
-- Add validation and verification steps
-- Support for multiple robots coordination
->>>>>>> Stashed changes
+### Prompt Caching
+
+OpenAI prompt caching reduces costs for repeated calls:
+
+```yaml
+runner:
+  intent_node:
+    prompt_cache_key: intent_node  # Enables caching for this node
+```
+
+### LLM Instance Caching
+
+Runner maintains a cache to avoid recreating models:
+
+```python
+cache_key = (model_name, temperature, prompt_cache_key, bind_tools)
+llm = self._llm_cache.get(cache_key) or create_llm(...)
+```
+
+### Environment Integration
+
+Fetches live environment data via HTTP:
+
+```python
+state_maker = StateMaker(config, url="http://127.0.0.1:8800")
+inputs = state_maker.make_inputs()
+# Returns: {object_text, skill_text, group_list_text}
+```
+
+## 📊 Monitoring
+
+### Token Usage Tracking
+
+Each LLM call records:
+- `total_tokens` - Total tokens consumed
+- `x-ratelimit-remaining-tokens` - Remaining quota
+- `x-ratelimit-remaining-requests` - Remaining request count
+
+### Callback Support
+
+```python
+runner = SupervisedPlanRunner(
+    config,
+    token_information_changed_callback=lambda info: print(info)
+)
+```
+
+## 🧪 Testing
+
+```bash
+# Interactive testing
+jupyter notebook test_planning.ipynb
+
+# Unit tests (if available)
+pytest tests/
+```
+
+## 🎯 Design Principles
+
+1. **Separation of Concerns** - Intent, feasibility, and planning are distinct stages
+2. **User-Centric** - Interactive feedback loop ensures clarity
+3. **Flexibility** - YAML configuration for easy model/skill updates
+4. **Robustness** - Comprehensive error handling and retry logic
+5. **Observability** - Detailed logging and token tracking
+
+## 📝 Example Scenarios
+
+### Scenario 1: Feasible Request
+```
+User: "Pick up the fork from the counter"
+Intent: new → Supervisor: feasible → Goal Decomp → Task Decomp → END
+```
+
+### Scenario 2: Infeasible Request
+```
+User: "Fly to the ceiling"
+Intent: new → Supervisor: not_feasible → Feedback: "Robot cannot fly..." → User Input
+```
+
+### Scenario 3: Question
+```
+User: "What objects are on the table?"
+Intent: question → Question Answer: "bowl, fork, plate" → User Input
+```
+
+### Scenario 4: Request Modification
+```
+User: "Actually, bring two apples"
+Intent: accept → Supervisor: feasible → Goal Decomp → ...
+```
+
+## 🔮 Future Enhancements
+
+- [ ] Action-level planning with primitive motions
+- [ ] RAG integration for knowledge retrieval
+- [ ] Multi-robot coordination
+- [ ] Visual grounding with object detection
+- [ ] Execution monitoring and replanning
+- [ ] Natural language plan explanations
+
+## 📚 Dependencies
+
+| Library | Purpose |
+|---------|---------|
+| `langchain` | LLM orchestration framework |
+| `langgraph` | Graph-based workflow management |
+| `openai` | GPT model API access |
+| `pydantic` | Data validation and settings |
+| `pyyaml` | Configuration file parsing |
+
+## 📄 License
+
+See LICENSE file for details.
+
+## 🙏 Acknowledgments
+
+Based on MLDT (Multi-Level Decomposition Task) planning architecture with supervised interaction capabilities.
