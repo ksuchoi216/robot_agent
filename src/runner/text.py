@@ -2,6 +2,19 @@ import requests
 from src.config.config import RobotSkillConfig
 
 
+def make_group_list_text(url):
+    response = requests.get(f"{url}/env_entire")
+    all = response.json()
+
+    groups = all["objects_by_group"].keys()
+    print(f"Groups found: {groups}")
+    group_list_text = "[\n"
+    for group in groups:
+        group_list_text += f'    "{group}",\n'
+    group_list_text += "]"
+    return group_list_text
+
+
 def make_object_text(url, object_name=None):
     response = requests.get(f"{url}/env_entire")
     all = response.json()

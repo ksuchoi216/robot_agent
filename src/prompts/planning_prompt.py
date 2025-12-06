@@ -1,15 +1,15 @@
 from typing import Callable, List
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
-def make_goal_node_inputs(state):
+def make_goal_decomp_node_inputs(state):
     return {
-        "user_query": state["user_query"],
+        "user_query": state["user_queries"][-1],
     }
 
 
-GOAL_NODE_PROMPT = """
+GOAL_DECOMP_NODE_PROMPT = """
 # Instruction
 You are the Goal-Level Planner in the MLDT pipeline.  
 Your job is to decompose the user's command into **independent high-level subgoals** that the robot must achieve.
@@ -41,11 +41,14 @@ Return ONLY the structured output that matches the JSON schema below.
 """
 
 
-class GoalNodeParser(BaseModel):
-    subgoals: List[str]
+class GoalDecompNodeParser(BaseModel):
+    subgoals: List[str] = Field(
+        ...,
+        description="A list of high-level subgoals decomposed from the user query.",
+    )
 
 
-def make_task_node_inputs(
+def make_task_decomp_node_inputs(
     state,
 ):
     def make_subgoals_text(subgoals):
@@ -64,7 +67,7 @@ def make_task_node_inputs(
     }
 
 
-TASK_NODE_PROMPT = """
+TASK_DECOMP_NODE_PROMPT = """
 # Role
 You are the Task-Level Planner in the MLDT pipeline.  
 Given a single subgoal from the Goal Node, your job is to decompose it into an ordered sequence of **semantic tasks** that the robot can perform using its built-in skills.
@@ -165,17 +168,26 @@ Return ONLY the structured output that matches the JSON schema below.
 
 
 class SubTask(BaseModel):
-    skill: str
-    target: str
+    skill: str = Field(..., description="The robot skill to be used for this task.")
+    target: str = Field(
+        ...,
+        description="The target object or group for the skill to act upon.",
+    )
 
 
 class SubGoal(BaseModel):
     subgoal: str
-    tasks: List[SubTask]
+    tasks: List[SubTask] = Field(
+        ...,
+        description="An ordered list of semantic tasks to achieve the subgoal.",
+    )
 
 
-class TaskNodeParser(BaseModel):
-    tasks: List[SubGoal]
+class TaskDecompNodeParser(BaseModel):
+    tasks: List[SubGoal] = Field(
+        ...,
+        description="A list of subgoals each decomposed into semantic tasks.",
+    )
 
 
 # 3. groups
