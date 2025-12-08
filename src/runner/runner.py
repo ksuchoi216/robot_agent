@@ -7,27 +7,17 @@ from typing import Any, Callable, Dict, List, Tuple
 from ..common.enums import ModelNames
 from ..common.errors import GraphInitializeError
 from ..common.logger import get_logger
-from ..config.config import Config
-
-# from ..prompts.planning_prompt import (
-#     GOAL_NODE_PROMPT,
-#     TASK_NODE_PROMPT,
-#     GoalNodeParser,
-#     TaskNodeParser,
-#     make_goal_node_inputs,
-#     make_task_node_inputs,
-# )
 from ..prompts import planning_prompt, process_prompt
 from . import graph as graph_module
-from .state import StateSchema
+from .state import BaseStateSchema, SupervisedPlanStateSchema
 
 logger = get_logger(__name__)
 
 
-class Runner:
+class GraphRunner:
     def __init__(
         self,
-        config: Config,
+        config,
         token_information_changed_callback: Callable | None = None,
     ):
         self.config = config
@@ -99,7 +89,7 @@ class Runner:
         return final_states
 
 
-class SupervisedPlanRunner(Runner):
+class SupervisedPlanGraphRunner(GraphRunner):
     def build_graph(self):
         nodes = {}
         routers = {}
@@ -187,8 +177,44 @@ class SupervisedPlanRunner(Runner):
         )
 
         return graph_module.make_supervised_plan_graph(
-            state_schema=StateSchema,
+            state_schema=SupervisedPlanStateSchema,
             nodes=nodes,
             routers=routers,
             thread_id="supervised_planning",
+        )
+
+
+class DecompRunner(GraphRunner):
+    def build_graph(self):
+        nodes = {}
+        routers = {}
+        nodes["goal_decomp"] = graph_module.make_normal_node(
+            llm=self._get_llm(
+                model_name=self.config.runner.goal_decomp_node.model_name,
+                prompt_cache_key=self.config.runner.goal_decomp_node.prompt_cache_key,
+            ),
+            prompt_text=planning_prompt.GOAL_DECOMP_NODE_PROMPT,
+            make_inputs=planning_prompt.make_goal_decomp_node_inputs,
+            parser_output=planning_prompt.GoalDecompNodeParser,
+            state_key="subgoals",
+            state_append=False,
+            node_name="GOAL_DECOMP_NODE",
+        )
+        nodes["task_decomp"] = graph_module.make_normal_node(
+            llm=self._get_llm(
+                model_name=self.config.runner.task_decomp_node.model_name,
+                prompt_cache_key=self.config.runner.task_decomp_node.prompt_cache_key,
+            ),
+            prompt_text=planning_prompt.TASK_DECOMP_NODE_PROMPT,
+            make_inputs=planning_prompt.make_task_decomp_node_inputs,
+            parser_output=planning_prompt.TaskDecompNodeParser,
+            state_key="tasks",
+            state_append=False,
+            node_name="TASK_DECOMP_NODE",
+        )
+        return graph_module.make_decomp_plan_graph(
+            state_schema=BaseStateSchema,
+            nodes=nodes,
+            routers=routers,
+            thread_id="decomp_planning",
         )

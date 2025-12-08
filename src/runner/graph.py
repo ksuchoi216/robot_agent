@@ -411,3 +411,27 @@ def make_supervised_plan_graph(
     graph = workflow.compile(checkpointer=None)
     config = {"configurable": {"thread_id": thread_id}}
     return graph, config
+
+
+def make_decomp_plan_graph(
+    state_schema,
+    nodes: Dict[str, Any],
+    routers: Dict[str, Any],
+    thread_id: str = "decomp_planning",
+):
+    workflow = StateGraph(state_schema=state_schema)
+    # * ============================================================
+    workflow.add_node("user_input", nodes["user_input"])
+    workflow.add_node("goal_decomp", nodes["goal_decomp"])
+    workflow.add_node("task_decomp", nodes["task_decomp"])
+
+    # * ============================================================
+    workflow.add_edge(START, "goal_decomp")
+    workflow.add_edge("goal_decomp", "task_decomp")
+    workflow.add_edge("task_decomp", END)
+
+    # memory = MemorySaver()
+    # graph = workflow.compile(checkpointer=memory)
+    graph = workflow.compile(checkpointer=None)
+    config = {"configurable": {"thread_id": thread_id}}
+    return graph, config
