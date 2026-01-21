@@ -1,5 +1,5 @@
 import requests
-from src.config.config import RobotSkillConfig
+from __src.config.config import RobotSkillConfig
 
 
 def make_group_list_text(url):
