@@ -1,4 +1,4 @@
-[submodule "with-robot-4th-lab"]
-	path = with-robot-4th-lab
-	url = git@github.com:ksuchoi216/with-robot-4th-lab.git
+[submodule "with-robot-5th"]
+	path = with-robot-5th
+	url = git@github.com:ksuchoi216/with-robot-5th.git
 	branch = main
