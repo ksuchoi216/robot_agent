@@ -8,7 +8,12 @@ from typing import Any, Dict, List
 from typing_extensions import TypedDict
 
 from ..config.config import Config
-from .text import make_group_list_text, make_object_text, make_skill_text
+from .text import (
+    make_camera_image,
+    make_group_list_text,
+    make_object_text,
+    make_skill_text,
+)
 
 # from robosuite.robosuite.environments.base import make
 
@@ -56,6 +61,11 @@ class StateMaker:
         inputs["skill_text"] = make_skill_text(self.config.skills)
         print(f"url: {self.url}")
         inputs["group_list_text"] = make_group_list_text(self.url)
+        camera_image_base64, camera_image_mime = make_camera_image(self.url)
+        if camera_image_base64:
+            inputs["camera_image_base64"] = camera_image_base64
+            if camera_image_mime:
+                inputs["camera_image_mime"] = camera_image_mime
         return inputs
 
     def make(self, *, user_query: str) -> StateSchema:

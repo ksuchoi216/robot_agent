@@ -1,3 +1,5 @@
+import base64
+
 import requests
 from __src.config.config import RobotSkillConfig
 
@@ -54,3 +56,39 @@ def make_skill_text(config_skills: list[RobotSkillConfig]) -> str:
         skill_text_list.append(skill_text)
 
     return "\n".join(skill_text_list)
+
+
+def make_camera_image(url, endpoints=None):
+    if endpoints is None:
+        endpoints = ("camera_frame", "camera_image", "camera")
+
+    for endpoint in endpoints:
+        endpoint = endpoint.lstrip("/")
+        response = requests.get(f"{url}/{endpoint}")
+        if response.status_code == 404:
+            continue
+        if not response.ok:
+            continue
+
+        content_type = response.headers.get("Content-Type", "")
+        if "application/json" in content_type:
+            payload = response.json()
+            image_base64 = (
+                payload.get("image_base64")
+                or payload.get("image")
+                or payload.get("frame")
+                or payload.get("data")
+            )
+            if image_base64:
+                image_mime = (
+                    payload.get("image_mime")
+                    or payload.get("mime")
+                    or payload.get("content_type")
+                    or ""
+                )
+                return image_base64, image_mime
+        if response.content:
+            image_base64 = base64.b64encode(response.content).decode("ascii")
+            return image_base64, content_type
+
+    return "", ""
